@@ -166,7 +166,7 @@ function shell() {
     mi('user', t('Mon profil'), () => { location.hash = '#/profile'; }), mi('palette', t('Personnaliser'), () => personalize({ onLang: () => { shell(); render(); } })), mi('refresh', t('Synchronisation'), () => syncCenter()), ...(installButton() ? [mi('download', t('Installer l\'application'), () => installButton().click())] : []),
     mi(isDark() ? 'sun' : 'moon', t('Thème'), () => setPrefs({ mode: isDark() ? 'light' : 'dark' })), mi('logout', t('Déconnexion'), logout, 'danger')));
   const top = h('header', { class: 'top' }, titleEl, phSel, netChip, bell, acct.wrap);
-  const impbar = state.impersonating ? h('div', { class: 'impbar', role: 'alert' }, icon('user', { size: 16 }), h('span', {}, `Prise de contrôle : vous agissez en tant que ${state.user.name} (${state.user.role}) — actions journalisées`), h('button', { class: 'btn sm', onclick: async () => { try { const d = await refresh(); location.hash = ''; await boot(d); } catch (e) { fail(e); } } }, icon('logout', { size: 14 }), 'Quitter')) : null;
+  const impbar = state.impersonating ? h('div', { class: 'impbar', role: 'alert' }, icon('user', { size: 16 }), h('span', {}, `Prise de contrôle : vous agissez en tant que ${state.user.name} (${state.user.role}) - actions journalisées`), h('button', { class: 'btn sm', onclick: async () => { try { const d = await refresh(); location.hash = ''; await boot(d); } catch (e) { fail(e); } } }, icon('logout', { size: 14 }), 'Quitter')) : null;
   app.append(h('div', { class: 'shell' }, side, h('div', { class: 'main' }, impbar, top, offbar, h('main', { class: 'content', id: 'content', tabIndex: -1 }))), tabbar, sheetBg);
   paintNet(); loadNotifs();
 }
