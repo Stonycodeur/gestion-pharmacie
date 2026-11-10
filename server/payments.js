@@ -57,7 +57,7 @@ export function markPaid(opId, detail) {
     run("UPDATE online_payments SET status='paid', paid_at=datetime('now'), deposit_id=?, detail=COALESCE(?,detail) WHERE id=?", dep, detail ?? null, op.id);
     const o = get('SELECT number FROM customer_orders WHERE id=?', op.order_id);
     audit({ ph: op.pharmacy_id, user: null, ip: null }, 'payment.online_paid', 'order', op.order_id, undefined, { amount: op.amount, method: op.method_code, ref: op.provider_ref });
-    notify({ pharmacyId: op.pharmacy_id, audience: 'staff', kind: 'payment', title: `Paiement en ligne reçu — ${o.number}` });
+    notify({ pharmacyId: op.pharmacy_id, audience: 'staff', kind: 'payment', title: `Paiement en ligne reçu - ${o.number}` });
     if (op.user_id) notify({ pharmacyId: op.pharmacy_id, userId: op.user_id, kind: 'payment', title: `Paiement reçu pour ${o.number}`, body: 'Merci, votre paiement est confirmé.' });
     publish(op.pharmacy_id, 'order', { id: op.order_id, payment: 'paid' }, op.user_id);
     return { ...op, status: 'paid' };
