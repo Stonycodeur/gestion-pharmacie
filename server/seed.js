@@ -1,4 +1,4 @@
-// Données FICTIVES de démonstration (aucune donnée réelle) — JAMAIS en production. Usage : npm run demo (efface la base !)
+// Données FICTIVES de démonstration (aucune donnée réelle) - JAMAIS en production. Usage : npm run demo (efface la base !)
 import { rmSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
