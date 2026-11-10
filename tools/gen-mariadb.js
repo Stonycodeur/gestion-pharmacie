@@ -46,7 +46,7 @@ while ((m = tableRe.exec(src))) {
 const idx = [...src.matchAll(/CREATE INDEX (\w+) ON (\w+)\((.*?)\);/g)].map((x) => `CREATE INDEX ${q(x[1])} ON ${q(x[2])} (${x[3].split(',').map((c) => q(c.trim())).join(', ')});`);
 const trig = ['audit_logs', 'stock_movements'].flatMap((t) => ['UPDATE', 'DELETE'].map((op) => `CREATE TRIGGER ${q(t + '_no_' + op.toLowerCase())} BEFORE ${op} ON ${q(t)} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${t} est en ajout seul';`))
   .concat(['sales', 'sale_lines'].map((t) => `CREATE TRIGGER ${q(t + '_no_delete')} BEFORE DELETE ON ${q(t)} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'une vente validée ne peut pas être supprimée (utiliser un remboursement)';`));
-const sql = `-- Gestion_pharmacie — schéma MariaDB 10.6+ (InnoDB, utf8mb4). GÉNÉRÉ par tools/gen-mariadb.js — ne pas modifier à la main.
+const sql = `-- Gestion_pharmacie - schéma MariaDB 10.6+ (InnoDB, utf8mb4). GÉNÉRÉ par tools/gen-mariadb.js - ne pas modifier à la main.
 -- ⚠ Non exécuté sur un serveur MariaDB dans l'environnement de développement initial : valider sur une instance de test (voir docs/MISE_EN_LIGNE.md).
 -- Montants : BIGINT en plus petite unité monétaire (ex. millimes pour TND).
 SET FOREIGN_KEY_CHECKS = 0;
