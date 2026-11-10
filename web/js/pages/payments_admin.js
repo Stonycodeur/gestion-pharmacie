@@ -14,14 +14,14 @@ export default async function () {
   };
   const secrets = (m) => { // champs du prestataire choisi (clés API chiffrées côté serveur ; jamais réaffichées sauf demande explicite auditée)
     const p = providers.find((x) => x.code === m.provider); if (!p?.fields.length) return Promise.resolve();
-    return formModal(`Clés ${p.label}`, p.fields.map((f) => ({ name: f, label: f + (m.has_config?.[f] ? ' (déjà définie — laisser vide pour conserver)' : ''), type: f === 'base_url' ? 'text' : 'password' })), async (v) => { const c = {}; for (const [k, x] of Object.entries(v)) if (x) c[k] = x; await put('/payment-methods/' + m.id, { config: c }); toast('Clés enregistrées (chiffrées)'); draw(); });
+    return formModal(`Clés ${p.label}`, p.fields.map((f) => ({ name: f, label: f + (m.has_config?.[f] ? ' (déjà définie - laisser vide pour conserver)' : ''), type: f === 'base_url' ? 'text' : 'password' })), async (v) => { const c = {}; for (const [k, x] of Object.entries(v)) if (x) c[k] = x; await put('/payment-methods/' + m.id, { config: c }); toast('Clés enregistrées (chiffrées)'); draw(); });
   };
   async function draw() {
     const r = await get('/payment-methods?all=1'); providers = r.providers;
     clear(card).append(h('div', { class: 'row between' }, h('h2', {}, 'Modes de paiement'), h('button', { class: 'btn sm primary', onclick: () => formModal('Nouveau mode de paiement', fields(), async (v) => { await post('/payment-methods', v); toast('Mode créé'); draw(); }) }, icon('plus', { size: 14 }), t('Nouveau'))),
       h('p', { class: 'muted' }, 'Seul le super-administrateur configure les modes. « Manuel » = encaissement au comptoir (espèces, TPE, chèque, virement confirmé à la main). Stripe / Konnect : paiement en ligne confirmé automatiquement par le prestataire (webhook signé).'),
       table([{ label: 'Mode', render: (m) => h('span', {}, h('strong', {}, m.label), h('div', { class: 'muted' }, m.code)) }, { label: 'Prestataire', render: (m) => providers.find((p) => p.code === m.provider)?.label || m.provider },
-        { label: 'Canaux', render: (m) => h('span', {}, m.channel_pos ? badge('Caisse', 'info') : null, ' ', m.channel_online ? badge('En ligne', 'info') : null) }, { label: 'Clés', render: (m) => (m.provider === 'manual' || m.provider === 'sandbox' ? '—' : Object.values(m.has_config || {}).some(Boolean) ? badge('Définies', 'ok') : badge('Manquantes', 'bad')) },
+        { label: 'Canaux', render: (m) => h('span', {}, m.channel_pos ? badge('Caisse', 'info') : null, ' ', m.channel_online ? badge('En ligne', 'info') : null) }, { label: 'Clés', render: (m) => (m.provider === 'manual' || m.provider === 'sandbox' ? '-' : Object.values(m.has_config || {}).some(Boolean) ? badge('Définies', 'ok') : badge('Manquantes', 'bad')) },
         { label: 'Statut', render: (m) => badge(m.enabled ? 'Actif' : 'Inactif', m.enabled ? 'ok' : 'warn') },
         { label: '', render: (m) => h('span', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => formModal('Modifier', fields(m), async (v) => { delete v.code; await put('/payment-methods/' + m.id, v); draw(); }) }, icon('edit', { size: 14 }), t('Modifier')),
           ['stripe', 'konnect'].includes(m.provider) ? h('button', { class: 'btn sm', onclick: () => secrets(m) }, icon('lock', { size: 14 }), 'Clés') : null,
