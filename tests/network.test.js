@@ -133,7 +133,7 @@ test('centre d\'aide : réclamation client, réponse signée au nom de la pharma
   const fid = det.body.messages[0].attachments[0].id;
   const img = await fetch(base + `/files/${fid}/content`, { headers: { authorization: 'Bearer ' + ph } }); assert.equal(img.status, 200); assert.equal(img.headers.get('content-type'), 'image/png');
   const r1 = await call('POST', `/help/tickets/${t.body.id}/messages`, { body: 'Nous vous remboursons', reply_as: 'pharmacy' }, ph); assert.equal(r1.status, 201); assert.ok(r1.body.signature.length > 2);
-  const r2 = await call('POST', `/help/tickets/${t.body.id}/messages`, { body: 'Cordialement', reply_as: 'user' }, ph); assert.ok(r2.body.signature.includes(' — '));
+  const r2 = await call('POST', `/help/tickets/${t.body.id}/messages`, { body: 'Cordialement', reply_as: 'user' }, ph); assert.ok(r2.body.signature.includes(' - '));
   const mine = await call('GET', '/help/tickets/' + t.body.id, null, ct); assert.equal(mine.body.status, 'answered'); assert.equal(mine.body.messages.length, 3);
   const notifs = await call('GET', '/portal/notifications', null, ct); assert.ok(notifs.body.some((n) => n.link && n.link.includes('ticket=' + t.body.id)));
   assert.equal((await call('POST', `/files/${fid}/decision`, { decision: 'accepted' }, ct)).status, 403); // l'expéditeur ne décide pas
