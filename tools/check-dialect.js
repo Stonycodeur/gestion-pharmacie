@@ -14,5 +14,5 @@ const BAD = [[/datetime\s*\(/i, 'datetime()'], [/\bdate\s*\('now'/i, "date('now'
 let bad = 0;
 for (const s of sqls) { const t = toMariaDb(s); for (const [re, name] of BAD) if (re.test(t)) { bad++; console.error(`✗ ${name} : ${s.slice(0, 160).replace(/\s+/g, ' ')}`); } }
 rmSync(dir, { recursive: true, force: true });
-console.log(`${sqls.length} requêtes distinctes analysées — ${bad ? bad + ' problème(s)' : 'aucune syntaxe SQLite restante après traduction'}`);
+console.log(`${sqls.length} requêtes distinctes analysées - ${bad ? bad + ' problème(s)' : 'aucune syntaxe SQLite restante après traduction'}`);
 process.exit(bad ? 1 : 0);
