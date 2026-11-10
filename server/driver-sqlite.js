@@ -1,4 +1,4 @@
-// Pilote SQLite (développement et tests) — node:sqlite, synchrone.
+// Pilote SQLite (développement et tests) - node:sqlite, synchrone.
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
