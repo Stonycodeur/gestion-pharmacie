@@ -93,7 +93,7 @@ const ov = (id) => { let o = ucache.get(id); if (!o) { o = { grant: new Set(), d
 export const userHas = (id, role, perm) => { if (role === 'super_admin') return roleHas(role, perm); const o = ov(id); return o.deny.has(perm) ? false : o.grant.has(perm) || roleHas(role, perm); };
 export const userPerms = (id, role) => (role === 'super_admin' ? permsOf(role) : Object.keys(PERMISSIONS).filter((p) => userHas(id, role, p)));
 export const overridesOf = (id) => { const o = ov(id); return { ...Object.fromEntries([...o.grant].map((p) => [p, 'grant'])), ...Object.fromEntries([...o.deny].map((p) => [p, 'deny'])) }; };
-// Rôles qu'un administrateur peut attribuer (jamais plus élevé que le sien) — inclut les rôles personnalisés créés par le super-administrateur.
+// Rôles qu'un administrateur peut attribuer (jamais plus élevé que le sien) - inclut les rôles personnalisés créés par le super-administrateur.
 export const assignableRoles = (actorRole) => {
   const all_ = all('SELECT code FROM roles').map((r) => r.code);
   if (actorRole === 'super_admin') return all_;
