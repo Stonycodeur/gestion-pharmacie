@@ -14,7 +14,7 @@ const label = (c) => LABELS[c] || c;
 export const money = (v, dec) => (Number(v) / Math.pow(10, dec)).toFixed(dec);
 
 // ---------------- PDF ----------------
-const CP1252 = { '€': 0x80, '‚': 0x82, '„': 0x84, '…': 0x85, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, 'Œ': 0x8c, 'œ': 0x9c };
+const CP1252 = { '€': 0x80, '‚': 0x82, '„': 0x84, '…': 0x85, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '-': 0x96, '-': 0x97, 'Œ': 0x8c, 'œ': 0x9c };
 function enc(s) {
   const out = [];
   for (const ch of String(s ?? '')) {
@@ -115,7 +115,7 @@ export function pdfReceipt(sale) {
 }
 
 // ---------------- XLSX ----------------
-function zip(files) { // files: [{name, data(Buffer)}] — méthode 0 (stockage), suffisant pour de petits classeurs
+function zip(files) { // files: [{name, data(Buffer)}] - méthode 0 (stockage), suffisant pour de petits classeurs
   const locals = [], centrals = []; let off = 0;
   for (const f of files) {
     const name = Buffer.from(f.name), crc = crc32(f.data), h = Buffer.alloc(30);
