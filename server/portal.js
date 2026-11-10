@@ -17,6 +17,6 @@ export function portalCustomer(ctx) {
   if (c.status !== 'active') throw new HttpError(403, 'FORBIDDEN', 'Profil client désactivé');
   ctx.ph = ph; return c;
 }
-// Invité : pas d'historique — seules les commandes/livraisons EN COURS restent visibles
+// Invité : pas d'historique - seules les commandes/livraisons EN COURS restent visibles
 export const ORDER_ACTIVE = "('pending','confirmed','preparing','ready')";
 export const DELIVERY_ACTIVE = "('issued','received','in_progress')";
