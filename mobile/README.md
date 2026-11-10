@@ -1,4 +1,4 @@
-# Application mobile — Pharmacie (Expo)
+# Application mobile - Pharmacie (Expo)
 
 **Principe : une coque native qui charge le site complet.** Les pages, les droits, les rôles (client, invité, personnel, chauffeur, médecin, super-admin), le mode hors connexion et la personnalisation sont **exactement ceux du web**, à chaque mise à jour du site, sans republier l'application. Le natif ajoute : notifications push, ouverture de la bonne page en touchant une notification, bouton Retour Android, liens externes (tel:, mailto:, WhatsApp) hors de l'application, écran « Connexion impossible » avec réessai automatique, appareil photo/galerie pour les ordonnances, position pour « pharmacie la plus proche » et suivi chauffeur.
 
