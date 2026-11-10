@@ -1,4 +1,4 @@
-# Render Blueprint — offre GRATUITE, MariaDB distante (Hostinger). Aucun disque : les fichiers sont stockés dans la base.
+# Render Blueprint - offre GRATUITE, MariaDB distante (Hostinger). Aucun disque : les fichiers sont stockés dans la base.
 # Render gratuit : le service s'endort après ~15 min d'inactivité (premier chargement lent) ; rien n'est perdu.
 services:
   - type: web
