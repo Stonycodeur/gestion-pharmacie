@@ -1,4 +1,4 @@
-// Mon profil : nom, téléphone (indicatif + numéro), photo de profil — modifiables par chaque utilisateur.
+// Mon profil : nom, téléphone (indicatif + numéro), photo de profil - modifiables par chaque utilisateur.
 import { get, put, post, del, state } from '../api.js';
 import { h, clear, fail, toast, icon } from '../ui.js';
 import { phoneField, filePicker } from '../net.js';
