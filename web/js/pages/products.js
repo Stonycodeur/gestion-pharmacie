@@ -1,0 +1,39 @@
+import { get, post, put, del, can, download, state } from '../api.js';
+import { h, clear, money, table, pager, badge, modal, formModal, confirmDialog, fail, toast, debounce, statusBadge, when, fileToBase64 } from '../ui.js';
+import { t } from '../i18n.js';
+
+export default async function (box) {
+  const [cats, mans] = await Promise.all([get('/categories'), get('/manufacturers')]); const list = h('div');
+  const q = h('input', { type: 'search', placeholder: t('Rechercher') + ' (nom, DCI, code-barres)', 'aria-label': t('Rechercher'), style: { minWidth: '260px' } });
+  const catSel = h('select', {}, h('option', { value: '' }, 'Toutes catégories'), cats.map((c) => h('option', { value: c.id }, c.name))), rxSel = h('select', {}, h('option', { value: '' }, 'Tous statuts'), ['free', 'prescription', 'controlled'].map((x) => h('option', { value: x }, t({ free: 'Libre', prescription: 'Sur ordonnance', controlled: 'Produit contrôlé' }[x]))));
+  const fields = (p = {}) => [
+    { name: 'sku', label: 'Référence interne', required: true, value: p.sku }, { name: 'name', label: 'Nom commercial', required: true, value: p.name }, { name: 'dci', label: 'DCI / principe actif', value: p.dci },
+    { name: 'dosage', label: 'Dosage', value: p.dosage }, { name: 'form', label: 'Forme', value: p.form }, { name: 'packaging', label: 'Conditionnement', value: p.packaging }, { name: 'barcode', label: 'Code-barres', value: p.barcode },
+    { name: 'category_id', label: 'Catégorie', type: 'select', value: p.category_id, options: cats.map((c) => ({ value: c.id, label: c.name })) }, { name: 'manufacturer_id', label: 'Fabricant / laboratoire', type: 'select', value: p.manufacturer_id, options: mans.map((c) => ({ value: c.id, label: c.name })) },
+    { name: 'rx_status', label: 'Statut de prescription', type: 'select', required: true, value: p.rx_status || 'free', options: [{ value: 'free', label: 'Libre' }, { value: 'prescription', label: 'Sur ordonnance' }, { value: 'controlled', label: 'Produit contrôlé' }] },
+    { name: 'storage_conditions', label: 'Conservation', value: p.storage_conditions }, { name: 'cold_chain', label: 'Chaîne du froid', type: 'checkbox', value: p.cold_chain },
+    ...(can('prices.manage') ? [{ name: 'purchase_price', label: 'Prix d\'achat', type: 'money', value: p.purchase_price ?? 0 }, { name: 'sale_price', label: 'Prix de vente TTC', type: 'money', value: p.sale_price ?? 0 }] : []),
+    { name: 'tax_rate', label: 'Taxe (%)', type: 'number', step: '0.1', value: p.tax_rate ?? 0 }, { name: 'min_stock', label: 'Seuil minimum', type: 'number', value: p.min_stock ?? 0, min: 0 }, { name: 'critical_stock', label: 'Seuil critique', type: 'number', value: p.critical_stock ?? 0, min: 0 }, { name: 'max_stock', label: 'Seuil maximum', type: 'number', value: p.max_stock ?? 0, min: 0 },
+  ];
+  async function load(page = 1) {
+    const r = await get(`/products?page=${page}&q=${encodeURIComponent(q.value)}&category_id=${catSel.value}&rx=${rxSel.value}`);
+    clear(list).append(table([{ label: 'Réf.', key: 'sku' }, { label: 'Nom', render: (p) => h('span', {}, h('strong', {}, p.name), h('div', { class: 'muted' }, [p.dci, p.dosage].filter(Boolean).join(' · '))) }, { label: 'Catégorie', key: 'category' }, { label: 'Statut', render: (p) => statusBadge('rx', p.rx_status) }, { label: 'Prix', num: true, render: (p) => money(p.sale_price) }, { label: 'Seuils', num: true, render: (p) => `${p.min_stock}/${p.critical_stock}/${p.max_stock}` }], r.data, { onRow: open }), pager(r, load));
+  }
+  async function open(row) {
+    const p = await get('/products/' + row.id); const alt = await get(`/products/${p.id}/alternatives`);
+    const extra = h('div', {}, p.price_history?.length ? h('details', {}, h('summary', {}, 'Historique des prix'), table([{ label: 'Date', render: (x) => when(x.created_at) }, { label: 'Achat', num: true, render: (x) => money(x.purchase_price) }, { label: 'Vente', num: true, render: (x) => money(x.sale_price) }], p.price_history)) : null,
+      alt.data.length ? h('div', { class: 'alert info' }, h('strong', {}, 'Équivalents / génériques : '), alt.data.map((a) => `${a.name} (${money(a.sale_price)})`).join(' ; '), h('div', {}, h('small', {}, 'Toute substitution est soumise à la validation du pharmacien.'))) : null,
+      can('products.manage') ? h('button', { class: 'btn danger sm', type: 'button', onclick: async () => { if (await confirmDialog('Désactiver ce produit ?', { danger: true })) { await del('/products/' + p.id); toast('Produit désactivé'); load(); } } }, 'Désactiver') : null);
+    if (!can('products.manage')) return modal(p.name, h('div', {}, table([{ label: 'Champ', key: 'k' }, { label: 'Valeur', key: 'v' }], [['Référence', p.sku], ['DCI', p.dci], ['Dosage', p.dosage], ['Forme', p.form], ['Conservation', p.storage_conditions], ['Prix', money(p.sale_price)]].map(([k, v]) => ({ k, v }))), extra), { wide: true });
+    formModal('Modifier', fields(p), async (v) => { await put('/products/' + p.id, v); toast('Produit enregistré'); load(); }, { wide: true, extra });
+  }
+  const importBtn = h('button', { class: 'btn', onclick: () => {
+    const file = h('input', { type: 'file', accept: '.csv,text/csv' }); const out = h('div'); let text = '';
+    const run = async (dry) => { try { const r = await post('/products/import', { csv: text, dry_run: dry, update_existing: upd.checked }); clear(out).append(h('div', { class: 'alert ' + (r.errors.length ? 'bad' : 'info') }, `${dry ? 'Simulation' : 'Import'} : ${r.created} création(s), ${r.updated} mise(s) à jour, ${r.duplicates.length} doublon(s), ${r.errors.length} erreur(s)`), r.duplicates.length ? h('div', {}, r.duplicates.slice(0, 20).map((d) => h('div', {}, `Ligne ${d.line} (${d.sku}) : ${d.why}`))) : null, r.errors.slice(0, 20).map((d) => h('div', { class: 'muted' }, `Ligne ${d.line} : ${d.message}`))); if (!dry && !r.errors.length) { toast('Import terminé'); load(); } } catch (e) { fail(e); if (e.details) clear(out).append(h('div', {}, (e.details.errors || []).slice(0, 20).map((d) => h('div', {}, `Ligne ${d.line} : ${d.message}`)))); } };
+    const upd = h('input', { type: 'checkbox' }); file.onchange = async () => { text = await file.files[0].text(); run(true); };
+    modal('Importer CSV', h('div', {}, h('p', { class: 'muted' }, 'Colonnes : sku, name, dci, dosage, form, packaging, barcode, rx_status, tax_rate, purchase_price, sale_price, min_stock, critical_stock, max_stock. Une simulation est lancée avant l\'import.'), file, h('label', {}, upd, ' Mettre à jour les références existantes'), out), { wide: true, actions: [h('button', { class: 'btn primary', onclick: () => text && run(false) }, 'Importer')] });
+  } }, t('Importer CSV'));
+  box.append(h('div', { class: 'row between' }, h('h1', {}, t('Produits')), h('div', { class: 'row' }, can('products.manage') ? [h('button', { class: 'btn', onclick: () => formModal('Nouvelle catégorie', [{ name: 'name', label: 'Nom', required: true }], async (v) => { await post('/categories', v); toast('Catégorie créée — rechargez la page'); }) }, '+ Catégorie'), h('button', { class: 'btn', onclick: () => formModal('Nouveau fabricant', [{ name: 'name', label: 'Nom', required: true }], async (v) => { await post('/manufacturers', v); toast('Fabricant créé — rechargez la page'); }) }, '+ Fabricant'), importBtn, h('button', { class: 'btn', onclick: () => download('/products/export.csv', 'produits.csv').catch(fail) }, t('Exporter CSV')), h('button', { class: 'btn primary', onclick: () => formModal('Nouveau', fields(), async (v) => { await post('/products', v); toast('Produit créé'); load(); }, { wide: true }) }, '+ ' + t('Nouveau'))] : null)),
+    h('div', { class: 'row', style: { margin: '12px 0' } }, q, catSel, rxSel), list);
+  const go = debounce(() => load()); q.oninput = go; catSel.onchange = rxSel.onchange = () => load(); await load();
+}

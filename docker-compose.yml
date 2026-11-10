@@ -1,0 +1,40 @@
+# Déploiement mono-serveur : application + MariaDB + reverse proxy TLS (Caddy, certificats automatiques).
+# 1) cp .env.example .env et renseigner JWT_SECRET, BACKUP_KEY, SETUP_TOKEN, MARIADB_PASSWORD, MARIADB_ROOT_PASSWORD   2) domaine dans Caddyfile   3) docker compose up -d --build
+services:
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?à définir dans .env}
+      MARIADB_DATABASE: Gestion_pharmacie
+      MARIADB_USER: gp
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?à définir dans .env}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--log-bin-trust-function-creators=1"]
+    volumes: [mariadb_data:/var/lib/mysql]
+    healthcheck: { test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"], interval: 5s, timeout: 3s, retries: 30 }
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DB_DRIVER: mariadb
+      MARIADB_HOST: mariadb
+      MARIADB_USER: gp
+      MARIADB_DATABASE: Gestion_pharmacie
+      UPLOAD_DIR: /app/data/uploads
+    volumes: [pharma_data:/app/data]
+    depends_on: { mariadb: { condition: service_healthy } }
+    expose: ["3000"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+volumes:
+  mariadb_data:
+  pharma_data:
+  caddy_data:

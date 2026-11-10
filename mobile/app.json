@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Pharmacie",
+    "slug": "gestion-pharmacie",
+    "version": "2.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f766e"
+    },
+    "ios": {
+      "bundleIdentifier": "com.jtconsultingcg.pharmacie",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Photographier une ordonnance ou scanner un code-barres.",
+        "NSPhotoLibraryUsageDescription": "Joindre la photo d'une ordonnance.",
+        "NSLocationWhenInUseUsageDescription": "Trouver la pharmacie la plus proche et suivre les livraisons.",
+        "NSMicrophoneUsageDescription": "Enregistrement vidéo (appareil photo).",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.jtconsultingcg.pharmacie",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f766e"
+      },
+      "permissions": [
+        "CAMERA",
+        "POST_NOTIFICATIONS",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Trouver la pharmacie la plus proche et suivre les livraisons."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#0f766e"
+        }
+      ]
+    ]
+  }
+}

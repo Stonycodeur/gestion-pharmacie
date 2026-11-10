@@ -1,0 +1,22 @@
+{
+  "name": "gestion-pharmacie",
+  "version": "1.0.0-dev",
+  "private": true,
+  "type": "module",
+  "description": "Plateforme intégrée de gestion pharmaceutique (backend Node 22 sans dépendance + web)",
+  "engines": { "node": ">=22.13" },
+  "optionalDependencies": { "mysql2": "^3.11.0" },
+  "scripts": {
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.js",
+    "demo": "node --disable-warning=ExperimentalWarning server/seed.js --reset",
+    "db:wipe": "node tools/wipe.js",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.js",
+    "gen:mariadb": "node tools/gen-mariadb.js",
+    "check:dialect": "node tools/check-dialect.js",
+    "check:mariadb": "node --env-file-if-exists=.env tools/mariadb-doctor.js",
+    "test:mariadb": "node tools/test-mariadb.js",
+    "backup": "node tools/backup.js backup",
+    "backup:verify": "node tools/backup.js verify"
+  }
+}

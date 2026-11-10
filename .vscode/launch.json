@@ -1,0 +1,7 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    { "name": "Démarrer l'API + web (dev)", "type": "node", "request": "launch", "program": "${workspaceFolder}/server/index.js", "runtimeArgs": ["--disable-warning=ExperimentalWarning"], "env": { "PORT": "3000" }, "console": "integratedTerminal" },
+    { "name": "Lancer les tests", "type": "node", "request": "launch", "runtimeArgs": ["--disable-warning=ExperimentalWarning", "--test", "tests/api.test.js"], "console": "integratedTerminal" }
+  ]
+}

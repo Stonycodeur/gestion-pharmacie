@@ -1,0 +1,5 @@
+{ "cli": { "version": ">= 12.0.0" },
+  "build": {
+    "preview": { "distribution": "internal", "android": { "buildType": "apk" }, "env": { "EXPO_PUBLIC_APP_URL": "https://pharmacie.jtconsultingcg.com" } },
+    "production": { "autoIncrement": true, "env": { "EXPO_PUBLIC_APP_URL": "https://pharmacie.jtconsultingcg.com" } } },
+  "submit": { "production": {} } }

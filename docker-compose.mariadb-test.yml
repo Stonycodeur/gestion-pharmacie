@@ -1,0 +1,8 @@
+# Serveur MariaDB JETABLE pour exécuter la suite de tests : docker compose -f docker-compose.mariadb-test.yml up -d --wait && npm run test:mariadb
+services:
+  mariadb:
+    image: mariadb:11.4
+    environment: { MARIADB_ROOT_PASSWORD: test }
+    ports: ["127.0.0.1:3307:3306"]
+    tmpfs: ["/var/lib/mysql"]
+    healthcheck: { test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"], interval: 3s, timeout: 3s, retries: 30 }

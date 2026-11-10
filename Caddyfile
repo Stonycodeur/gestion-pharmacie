@@ -1,0 +1,7 @@
+# Serveur (VPS) avec docker-compose : TLS (1.2/1.3) automatique via Let's Encrypt.
+# Le DNS de pharmacie.jtconsultingcg.com doit pointer (enregistrement A) vers l'IP du serveur AVANT le démarrage.
+# Inutile sur Render : Render fournit déjà le HTTPS.
+pharmacie.jtconsultingcg.com {
+	encode gzip
+	reverse_proxy app:3000
+}

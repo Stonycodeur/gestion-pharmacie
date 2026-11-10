@@ -1,0 +1,4 @@
+{ "version": "2.0.0", "tasks": [
+  { "label": "Réinitialiser la base de démo", "type": "npm", "script": "demo" },
+  { "label": "Démarrer (dev)", "type": "npm", "script": "dev", "isBackground": true, "problemMatcher": [] },
+  { "label": "Tests", "type": "npm", "script": "test" } ] }

@@ -1,0 +1,23 @@
+import { get, can, download, qs } from '../api.js';
+import { h, clear, money, table, badge, fail, tabs, barChart, when } from '../ui.js';
+import { t } from '../i18n.js';
+
+export default async function (box) {
+  const today = new Date().toISOString().slice(0, 10), from = h('input', { type: 'date', value: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10), 'aria-label': 'Du' }), to = h('input', { type: 'date', value: today, 'aria-label': 'Au' });
+  let tab = 'sales'; const head = h('div'), body = h('div'), exp = h('button', { class: 'btn' }, t('Exporter CSV')), expX = h('button', { class: 'btn' }, 'Excel'), expP = h('button', { class: 'btn' }, 'PDF');
+  const R = {
+    sales: ['Ventes', '/reports/sales', async (r) => [barChart(r.data.map((x) => ({ period: x.period, net: x.net }))), table([{ label: 'Période', key: 'period' }, { label: 'Tickets', num: true, key: 'tickets' }, { label: 'Brut', num: true, render: (x) => money(x.gross) }, { label: 'Remises', num: true, render: (x) => money(x.discount) }, { label: 'Remboursé', num: true, render: (x) => money(x.refunded) }, { label: 'Net', num: true, render: (x) => money(x.net) }, { label: 'Taxes', num: true, render: (x) => money(x.tax) }, { label: 'Marge HT', num: true, render: (x) => (x.margin != null ? money(x.margin) : '') }], r.data)] ],
+    payments: ['Paiements', '/reports/payments', async (r) => table([{ label: 'Mode', key: 'method' }, { label: 'Opérations', num: true, key: 'n' }, { label: 'Total', num: true, render: (x) => money(x.total) }], r.data)],
+    top: ['Produits', '/reports/top-products', async (r) => table([{ label: 'Réf.', key: 'sku' }, { label: 'Produit', key: 'name' }, { label: 'Quantité', num: true, key: 'qty' }, { label: 'CA TTC', num: true, render: (x) => money(x.revenue) }], r.data)],
+    valuation: ['Valorisation du stock', '/reports/stock-valuation', async (r) => [h('div', { class: 'card kpi', style: { marginBottom: '12px' } }, h('div', { class: 'l' }, `Valeur totale (méthode : ${r.method})`), h('div', { class: 'v' }, money(r.total))), table([{ label: 'Réf.', key: 'sku' }, { label: 'Produit', key: 'name' }, { label: 'Qté', num: true, key: 'qty' }, { label: 'Valeur', num: true, render: (x) => money(x.value) }], r.data)]],
+    expiry: ['Péremptions', '/reports/expiry', async (r) => table([{ label: 'Produit', key: 'name' }, { label: 'Lot', key: 'batch_no' }, { label: 'Péremption', key: 'exp_date' }, { label: 'Qté', num: true, key: 'qty' }, { label: 'État', render: (x) => badge(x.state, x.state === 'périmé' ? 'bad' : 'warn') }], r.data)],
+    losses: ['Pertes', '/reports/losses', async (r) => table([{ label: 'Date', render: (x) => when(x.created_at) }, { label: 'Type', key: 'type' }, { label: 'Produit', key: 'name' }, { label: 'Lot', key: 'batch_no' }, { label: 'Qté', num: true, key: 'qty' }, { label: 'Valeur', num: true, render: (x) => money(x.value) }, { label: 'Motif', key: 'reason' }], r.data)],
+    cash: ['Caisses', '/reports/cash', async (r) => table([{ label: 'Ouverture', render: (x) => when(x.opened_at) }, { label: 'Caissier', key: 'cashier' }, { label: 'Caisse', key: 'register' }, { label: 'Attendu', num: true, render: (x) => (x.expected_cash != null ? money(x.expected_cash) : '') }, { label: 'Compté', num: true, render: (x) => (x.counted_cash != null ? money(x.counted_cash) : '') }, { label: 'Écart', num: true, render: (x) => (x.difference != null ? badge(money(x.difference), x.difference ? 'bad' : 'ok') : '') }, { label: 'Justification', key: 'difference_reason' }], r.data)],
+  };
+  if (can('accounting.view')) R.tax = ['Taxes', '/reports/tax', async (r) => table([{ label: 'Taux %', num: true, key: 'tax_rate' }, { label: 'HT', num: true, render: (x) => money(x.ht) }, { label: 'Taxe', num: true, render: (x) => money(x.tax) }, { label: 'TTC', num: true, render: (x) => money(x.ttc) }], r.data)];
+  const params = () => qs({ from: from.value, to: to.value });
+  async function show(id) { tab = id; clear(head).append(tabs(Object.entries(R).map(([k, v]) => [k, v[0]]), tab, show)); clear(body).append(h('div', { class: 'empty' }, t('Chargement…'))); try { const r = await get(R[tab][1] + params()); clear(body).append(...[].concat(await R[tab][2](r))); } catch (e) { clear(body); fail(e); } }
+  for (const [b, f, ext] of [[exp, 'csv', 'csv'], [expX, 'xlsx', 'xlsx'], [expP, 'pdf', 'pdf']]) { b.style.display = can('reports.export') ? '' : 'none'; b.onclick = () => download(R[tab][1] + params() + (params() ? '&' : '?') + 'format=' + f, `${tab}.${ext}`).catch(fail); }
+  from.onchange = to.onchange = () => show(tab);
+  box.append(h('h1', {}, t('Rapports')), h('div', { class: 'row', style: { margin: '8px 0 14px' } }, from, '→', to, exp, expX, expP), head, body); await show('sales');
+}
