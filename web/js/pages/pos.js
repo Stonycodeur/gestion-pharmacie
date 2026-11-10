@@ -6,7 +6,7 @@ import { t, fmtDate } from '../i18n.js';
 export async function receipt(sale) {
   const ph = sale.pharmacy || state.pharmacy || {};
   const L = (a, b, bold) => h('div', { class: 'l', style: bold ? { fontWeight: 700 } : null }, h('span', {}, a), h('span', {}, b));
-  const node = h('div', { class: 'receipt print-area' }, sale.offline ? h('div', { class: 'alert warn' }, 'TICKET PROVISOIRE — vente enregistrée hors connexion, numéro définitif attribué à la synchronisation.') : null, h('div', { style: { textAlign: 'center' } }, h('strong', {}, ph.name), h('div', {}, ph.address || ''), h('div', {}, ph.phone || '')), h('hr'),
+  const node = h('div', { class: 'receipt print-area' }, sale.offline ? h('div', { class: 'alert warn' }, 'TICKET PROVISOIRE - vente enregistrée hors connexion, numéro définitif attribué à la synchronisation.') : null, h('div', { style: { textAlign: 'center' } }, h('strong', {}, ph.name), h('div', {}, ph.address || ''), h('div', {}, ph.phone || '')), h('hr'),
     L(sale.number, fmtDate(sale.created_at)), h('div', {}, `${t('Caisse / Vente')} : ${sale.cashier_name}`), sale.customer_name ? h('div', {}, `${t('Client')} : ${sale.customer_name}`) : null, h('hr'),
     sale.lines.map((l) => h('div', {}, h('div', {}, l.product_name), L(`${l.qty} × ${money(l.unit_price, false)}${l.discount ? ' − ' + money(l.discount, false) : ''}`, money(l.line_total, false)), l.batch_no ? h('small', { class: 'muted' }, `${t('Lot')} ${l.batch_no} · ${l.exp_date}`) : null)), h('hr'),
     L(t('Total'), money(sale.total), true), L('dont taxes', money(sale.tax_total)), sale.payments.map((p) => L(methodLabel(p.method), money(p.amount))), sale.change_given ? L(t('Rendu'), money(sale.change_given)) : null, sale.balance_due > 0 ? L('RESTE À PAYER', money(sale.balance_due), true) : null, h('hr'),
@@ -73,7 +73,7 @@ export default async function (box) {
   }
   async function loadPres() {
     if (!presSel) return; const keep = presId; clear(presSel); presSel.append(h('option', { value: '' }, t('Ordonnance') + ' *'));
-    try { const r = await get('/prescriptions?limit=100&q='); r.data.filter((p) => ['validated', 'partially_delivered'].includes(p.status)).forEach((p) => presSel.append(h('option', { value: p.id, selected: p.id === keep }, `${p.number} — ${p.patient_name}`))); } catch {}
+    try { const r = await get('/prescriptions?limit=100&q='); r.data.filter((p) => ['validated', 'partially_delivered'].includes(p.status)).forEach((p) => presSel.append(h('option', { value: p.id, selected: p.id === keep }, `${p.number} - ${p.patient_name}`))); } catch {}
   }
   const idem = () => crypto.randomUUID();
   let key = idem();
@@ -87,17 +87,17 @@ export default async function (box) {
       const sale = { number: 'HORS-LIGNE-' + key.slice(0, 6).toUpperCase(), offline: true, created_at: new Date().toISOString().slice(0, 19).replace('T', ' '), cashier_name: state.user.name, customer_name: customer ? custName : null, total: tot, tax_total: snapshot.reduce((a, l) => a + taxOf(l.p.sale_price * l.qty - l.discount, l.p.tax_rate), 0), change_given: kindOf(method) === 'cash' && received > tot ? received - tot : 0, balance_due: 0,
         lines: snapshot.map((l) => ({ product_name: l.p.name, qty: l.qty, unit_price: l.p.sale_price, discount: l.discount, line_total: l.p.sale_price * l.qty - l.discount })), payments: pays.map((p) => ({ ...p, amount: Math.min(p.amount, tot) })) };
       await enqueue({ key, method: 'POST', path: '/sales', body: { ...payload, offline_at: new Date().toISOString(), expected_total: tot }, label: sale.number, total: tot, lines: payload.lines });
-      await refreshQueued(); done(); toast(`${sale.number} — ${money(tot)}`); receipt(sale);
+      await refreshQueued(); done(); toast(`${sale.number} - ${money(tot)}`); receipt(sale);
     };
     if (!net.online) return queueIt().catch(fail);
-    try { const sale = await post('/sales', payload); done(); toast(`${sale.number} — ${money(sale.total)}`); receipt(sale); }
+    try { const sale = await post('/sales', payload); done(); toast(`${sale.number} - ${money(sale.total)}`); receipt(sale); }
     catch (e) { if (e.status === 0 && !credit) return queueIt().catch(fail); fail(e); if (e.code === 'NO_OPEN_CASH_SESSION') location.reload(); }
   }
   function drawGate() {
     clear(gate);
     if (session) return;
     if (sessionErr?.status === 0 || !net.online) return gate.append(h('div', { class: 'alert warn' }, icon('wifioff', { size: 18 }), h('span', {}, 'Hors connexion et aucune session de caisse en cache : ouvrez la caisse une première fois avec le réseau. Vous pouvez néanmoins encaisser : la vente sera rattachée à la caisse ouverte au moment de la synchronisation.')));
-    get('/cash/registers').then((regs) => gate.append(h('div', { class: 'alert warn' }, icon('wallet', { size: 18 }), h('span', {}, h('strong', {}, t('Ouvrir la caisse')), ' — ouvrez une session avant de vendre. ', h('button', { class: 'btn sm primary', onclick: () => formModal('Ouvrir la caisse', [{ name: 'register_id', label: 'Caisse', type: 'select', required: true, options: regs.map((r) => ({ value: r.id, label: r.name })) }, { name: 'opening_float', label: 'Fond de caisse', type: 'money', value: 0 }], async (v) => { await post('/cash/open', v); session = await get('/cash/current'); drawGate(); }) }, t('Ouvrir la caisse')))))).catch(() => {});
+    get('/cash/registers').then((regs) => gate.append(h('div', { class: 'alert warn' }, icon('wallet', { size: 18 }), h('span', {}, h('strong', {}, t('Ouvrir la caisse')), ' - ouvrez une session avant de vendre. ', h('button', { class: 'btn sm primary', onclick: () => formModal('Ouvrir la caisse', [{ name: 'register_id', label: 'Caisse', type: 'select', required: true, options: regs.map((r) => ({ value: r.id, label: r.name })) }, { name: 'opening_float', label: 'Fond de caisse', type: 'money', value: 0 }], async (v) => { await post('/cash/open', v); session = await get('/cash/current'); drawGate(); }) }, t('Ouvrir la caisse')))))).catch(() => {});
   }
   const cartCard = h('div', { class: 'card cartcard' }, h('h2', {}, icon('cart', { size: 20 }), ' ', t('Panier')), cartBox, payBox);
   box.append(h('div', { class: 'row between', style: { marginBottom: '10px' } }, h('h1', {}, t('Caisse / Vente')), h('button', { class: 'btn', onclick: () => { cart.length = 0; touched = false; drawCart(); search.focus(); } }, icon('plus', { size: 16 }), t('Nouvelle vente'))), gate,
