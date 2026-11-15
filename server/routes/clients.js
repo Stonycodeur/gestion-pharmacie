@@ -1,3 +1,4 @@
+import { AFF } from './drivers.js';
 import { portalCustomer, isGuest, OWN, ORDER_ACTIVE } from '../portal.js';
 import { router, audit, paged, can, need, notify, publish } from '../http.js';
 import { get, all, run, insert, tx, nextNumber, getSetting } from '../db.js';
@@ -6,6 +7,7 @@ import { allocate, applyMovement, reserve } from '../stock.js';
 import { createSale, recomputePrescriptionStatus } from '../sales.js';
 import { storeBlob, readBlob, dropBlob } from '../files.js';
 import { avEnabled, scanBuffer } from '../antivirus.js';
+import { scanUpload } from '../scanner.js';
 
 // ================= CLIENTS =================
 const custInput = (b) => ({
@@ -58,6 +60,7 @@ function saveFile(f) {
   if (!buf.length || buf.length > MAX_FILE) throw bad('FILE_SIZE', `Fichier vide ou > ${MAX_FILE / 1048576} Mo`);
   const magic = { 'image/jpeg': [0xff, 0xd8, 0xff], 'image/png': [0x89, 0x50, 0x4e, 0x47], 'application/pdf': [0x25, 0x50, 0x44, 0x46] }[mime];
   if (!magic.every((b, i) => buf[i] === b)) throw bad('FILE_TYPE', 'Le contenu du fichier ne correspond pas à son type');
+  const av = scanUpload(buf, mime, f.name); if (av.infected) throw bad('MALWARE', `Fichier refusé par l'antivirus : ${av.reason}`); // antivirus intégré, avant tout stockage
   const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' }[mime], name = storeBlob(buf, mime, ext, false);
   if (avEnabled()) setImmediate(async () => {
     try { const r = await scanBuffer(buf); if (!r.infected) return; dropBlob(name); run("UPDATE prescriptions SET file_path=NULL, file_name='FICHIER REFUSÉ (antivirus)' WHERE file_path=?", name); audit({ ph: null, ip: null }, 'upload.infected', 'file', name, undefined, { signature: r.signature }); console.error('[antivirus] fichier infecté supprimé :', r.signature); }
@@ -79,7 +82,7 @@ export function createPrescription(ctx, b, customerId) {
     for (const l of lines) { if (!get('SELECT 1 FROM products WHERE id=?', l.product_id)) throw bad('VALIDATION', 'Produit inconnu'); insert('INSERT INTO prescription_lines(prescription_id,product_id,qty_prescribed,posology) VALUES (?,?,?,?)', id, l.product_id, l.qty_prescribed, l.posology); }
     insert('INSERT INTO prescription_reviews(prescription_id,from_status,to_status,reason,user_id) VALUES (?,?,?,?,?)', id, null, 'received', 'Ordonnance reçue', ctx.user.id);
     audit(ctx, 'prescription.create', 'prescription', id, undefined, { number, patient });
-    notify({ pharmacyId: ctx.ph, audience: 'pharmacist', kind: 'prescription', title: `Nouvelle ordonnance à vérifier : ${number}`, body: patient });
+    notify({ pharmacyId: ctx.ph, audience: 'pharmacist', kind: 'prescription', title: `Nouvelle ordonnance à vérifier : ${number}`, body: patient, link: `#/prescriptions?id=${id}` });
     return { id, number };
   });
 }
@@ -130,7 +133,7 @@ router.post('/prescriptions/:id/transition', { perm: 'prescriptions.create', ok2
     run("UPDATE prescriptions SET status=?, status_reason=?, validated_by=?, updated_at=datetime('now') WHERE id=?", to, reason, to === 'validated' ? ctx.user.id : p.validated_by, p.id);
     insert('INSERT INTO prescription_reviews(prescription_id,from_status,to_status,reason,user_id) VALUES (?,?,?,?,?)', p.id, p.status, to, to === 'validated' ? 'Contrôle pharmacien : identité, lisibilité, date, prescripteur, produits/posologie' : reason, ctx.user.id);
     audit(ctx, 'prescription.' + to, 'prescription', p.id, { status: p.status }, { status: to, reason });
-    if (p.customer_id) { const cu = get('SELECT user_id FROM customers WHERE id=?', p.customer_id); if (cu?.user_id) notify({ pharmacyId: ctx.ph, userId: cu.user_id, kind: 'prescription_status', title: `Ordonnance ${p.number} : ${to}`, body: reason }); }
+    if (p.customer_id) { const cu = get('SELECT user_id FROM customers WHERE id=?', p.customer_id); if (cu?.user_id) notify({ pharmacyId: ctx.ph, userId: cu.user_id, kind: 'prescription_status', title: `Ordonnance ${p.number} : ${to}`, body: reason, link: `#/portal?tab=rx&id=${p.id}` }); }
   });
   return { ok: true, status: to };
 });
@@ -150,7 +153,7 @@ export function createOrder(ctx, { customerId, kind, lines, notes, address }) {
       }
     }
     audit(ctx, 'order.create', 'order', id, undefined, { number, kind });
-    notify({ pharmacyId: ctx.ph, audience: 'staff', kind: 'order', title: `Nouvelle ${kind === 'order' ? 'commande' : 'réservation'} ${number}` });
+    notify({ pharmacyId: ctx.ph, audience: 'staff', kind: 'order', title: `Nouvelle ${kind === 'order' ? 'commande' : 'réservation'} ${number}`, link: `#/orders?id=${id}` });
     return { id, number, expires_at: get('SELECT expires_at e FROM customer_orders WHERE id=?', id).e };
   });
 }
@@ -167,6 +170,14 @@ export function expireOrders() { // libération automatique des réservations é
   return n;
 }
 const olines = (b) => arr(b.lines, 'lignes', { required: true, max: 50 }).map((l) => ({ product_id: int(l.product_id, 'produit', { required: true, min: 1 }), qty: int(l.qty, 'quantité', { required: true, min: 1, max: 1000 }) }));
+// « Prêt pour la livraison » : la commande est prête et une livraison est demandée → le chauffeur affecté est prévenu et part vers la pharmacie.
+export function readyForDelivery(d, userId) {
+  if (d.status === 'issued') run("UPDATE deliveries SET status='received', updated_at=datetime('now') WHERE id=?", d.id);
+  const drv = d.driver_id ? get('SELECT name,matricule,user_id FROM drivers WHERE id=?', d.driver_id) : null;
+  insert('INSERT INTO delivery_events(delivery_id,status,note,user_id,driver_name,driver_matricule) VALUES (?,?,?,?,?,?)', d.id, 'received', drv ? 'Commande prête — chauffeur en route vers la pharmacie' : 'Commande prête pour la livraison', userId, drv?.name ?? null, drv?.matricule ?? null);
+  if (drv?.user_id) notify({ pharmacyId: d.pharmacy_id, userId: drv.user_id, kind: 'delivery', title: `Commande prête : rendez-vous à la pharmacie (${d.number})`, link: `#/driver?id=${d.id}` });
+  const cu = get('SELECT user_id FROM customers WHERE id=?', d.customer_id)?.user_id; publish(d.pharmacy_id, 'delivery', { id: d.id, order_id: d.order_id, number: d.number, status: 'received' }, cu); publish(d.pharmacy_id, 'delivery', { id: d.id, order_id: d.order_id, number: d.number, status: 'received' });
+}
 router.get('/orders', { perm: 'orders.view' }, (ctx) => {
   const w = ['o.pharmacy_id=?'], p = [ctx.ph]; if (ctx.query.status) { w.push('o.status=?'); p.push(ctx.query.status); }
   return paged(ctx, `SELECT COUNT(*) n FROM customer_orders o WHERE ${w.join(' AND ')}`, `SELECT o.*, c.name customer_name, (SELECT COUNT(*) FROM order_lines WHERE order_id=o.id) lines FROM customer_orders o JOIN customers c ON c.id=o.customer_id WHERE ${w.join(' AND ')} ORDER BY o.id DESC`, p);
@@ -174,7 +185,8 @@ router.get('/orders', { perm: 'orders.view' }, (ctx) => {
 router.get('/orders/:id', { perm: 'orders.view' }, (ctx) => {
   const o = get('SELECT o.*, c.name customer_name, c.phone customer_phone FROM customer_orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=? AND o.pharmacy_id=?', ctx.params.id, ctx.ph); if (!o) throw notFound('Commande');
   o.lines = all('SELECT l.*, p.name product_name, p.sale_price, p.rx_status FROM order_lines l JOIN products p ON p.id=l.product_id WHERE l.order_id=?', o.id);
-  o.history = all('SELECT h.*, u.name user_name FROM order_status_history h LEFT JOIN users u ON u.id=h.user_id WHERE h.order_id=? ORDER BY h.id', o.id); return o;
+  o.history = all('SELECT h.*, u.name user_name FROM order_status_history h LEFT JOIN users u ON u.id=h.user_id WHERE h.order_id=? ORDER BY h.id', o.id);
+  o.delivery_id = get("SELECT id FROM deliveries WHERE order_id=? AND status NOT IN ('cancelled','delivered','failed')", o.id)?.id ?? null; return o;
 });
 router.post('/orders', { perm: 'orders.manage' }, (ctx) => {
   const cid = int(ctx.body.customer_id, 'client', { required: true, min: 1 }); if (!get('SELECT 1 FROM customers WHERE id=? AND pharmacy_id=?', cid, ctx.ph)) throw bad('VALIDATION', 'Client inconnu');
@@ -190,8 +202,9 @@ router.post('/orders/:id/status', { perm: 'orders.manage', ok200: true }, (ctx) 
     run("UPDATE customer_orders SET status=?, updated_at=datetime('now') WHERE id=?", to, o.id);
     insert('INSERT INTO order_status_history(order_id,from_status,to_status,user_id) VALUES (?,?,?,?)', o.id, o.status, to, ctx.user.id);
     audit(ctx, 'order.' + to, 'order', o.id, { status: o.status }, { status: to });
+    const dl = to === 'ready' ? get("SELECT * FROM deliveries WHERE order_id=? AND status IN ('issued','received')", o.id) : null; if (dl) readyForDelivery(dl, ctx.user.id);
     const cu = get('SELECT user_id FROM customers WHERE id=?', o.customer_id);
-    if (cu?.user_id) notify({ pharmacyId: ctx.ph, userId: cu.user_id, kind: 'order_status', title: `Commande ${o.number} : ${to === 'ready' ? 'prête au retrait' : to}` });
+    if (cu?.user_id) notify({ pharmacyId: ctx.ph, userId: cu.user_id, kind: 'order_status', title: `Commande ${o.number} : ${to === 'ready' ? (dl ? 'prête pour la livraison' : 'prête au retrait') : to}`, link: `#/portal?tab=orders&id=${o.id}` });
   });
   return { ok: true };
 });
@@ -220,10 +233,14 @@ router.get('/portal/catalog', { anyPerm: ['portal.use', 'portal.guest'], needsPh
     (SELECT COALESCE(SUM(s.qty_available - s.qty_reserved),0) FROM stock_levels s JOIN batches b ON b.id=s.batch_id WHERE s.pharmacy_id=? AND b.product_id=p.id AND b.status='ok' AND b.exp_date >= date('now')) > 0 AS available
     FROM products p WHERE p.status='active' AND EXISTS (SELECT 1 FROM pharmacy_catalog pc WHERE pc.product_id=p.id AND pc.pharmacy_id=?) AND (p.name LIKE ? OR p.dci LIKE ?) ORDER BY p.name LIMIT 50`, c.pharmacy_id, c.pharmacy_id, q, q);
 });
-router.get('/portal/orders', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => { return all(`SELECT o.pharmacy_id, (SELECT name FROM pharmacies WHERE id=o.pharmacy_id) pharmacy_name, o.notes, o.id,o.number,o.kind,o.status,o.expires_at,o.created_at,(SELECT COALESCE(SUM(l.qty*p.sale_price),0) FROM order_lines l JOIN products p ON p.id=l.product_id WHERE l.order_id=o.id) total,(SELECT COALESCE(SUM(d.amount),0) FROM order_deposits d WHERE d.order_id=o.id AND d.status IN ('held','applied')) paid,(SELECT x.id FROM deliveries x WHERE x.order_id=o.id) delivery_id,(SELECT x.status FROM deliveries x WHERE x.order_id=o.id) delivery_status FROM customer_orders o WHERE o.customer_id IN (SELECT id FROM customers WHERE user_id=?) ${isGuest(ctx) ? "AND o.status IN ('pending','confirmed','preparing','ready')" : ''} ORDER BY o.id DESC`, ctx.user.id); });
+router.get('/portal/orders', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => { return all(`SELECT o.pharmacy_id, (SELECT name FROM pharmacies WHERE id=o.pharmacy_id) pharmacy_name, o.notes, o.id,o.number,o.kind,o.status,o.expires_at,o.created_at,(SELECT COALESCE(SUM(l.qty*p.sale_price),0) FROM order_lines l JOIN products p ON p.id=l.product_id WHERE l.order_id=o.id) total,(SELECT COALESCE(SUM(d.amount),0) FROM order_deposits d WHERE d.order_id=o.id AND d.status IN ('held','applied')) paid,(SELECT x.id FROM deliveries x WHERE x.order_id=o.id) delivery_id,(SELECT x.status FROM deliveries x WHERE x.order_id=o.id) delivery_status FROM customer_orders o WHERE o.customer_id IN (SELECT id FROM customers WHERE user_id=?) ${isGuest(ctx) ? "AND o.status IN ('pending','confirmed','preparing','ready')" : ''} ORDER BY o.id DESC`, ctx.user.id).map((o) => ({ ...o, drivers_available: ['preparing', 'ready'].includes(o.status) && !o.delivery_id ? get("SELECT COUNT(*) n FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available'", o.pharmacy_id, o.pharmacy_id).n : 0 })); });
 router.post('/portal/orders', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => {
   const c = me(ctx); const lines = olines(ctx.body);
-  for (const l of lines) if (get('SELECT rx_status FROM products WHERE id=?', l.product_id)?.rx_status !== 'free') throw conflict('PRESCRIPTION_REQUIRED', 'Les produits sur ordonnance se réservent après dépôt et validation d\'une ordonnance en pharmacie');
+  for (const l of lines) { // produit sur ordonnance : possible seulement avec une ordonnance du client VALIDÉE par la pharmacie (jamais pour les produits contrôlés)
+    const rx = get('SELECT rx_status FROM products WHERE id=?', l.product_id)?.rx_status; if (rx === 'free') continue;
+    if (rx === 'controlled' || !get("SELECT 1 FROM prescriptions pr JOIN prescription_lines pl ON pl.prescription_id=pr.id WHERE pr.customer_id=? AND pr.pharmacy_id=? AND pl.product_id=? AND pr.status IN ('validated','partially_delivered') AND (pr.valid_until IS NULL OR pr.valid_until>=date('now'))", c.id, ctx.ph, l.product_id))
+      throw conflict('PRESCRIPTION_REQUIRED', 'Ce médicament nécessite une ordonnance transmise à cette pharmacie et validée par le pharmacien avant la commande');
+  }
   return createOrder({ ...ctx, user: { ...ctx.user, id: ctx.user.id } }, { customerId: c.id, kind: 'reservation', lines, notes: str(ctx.body.notes, 'notes', { max: 500 }) });
 });
 router.get('/portal/prescriptions', { perm: 'portal.use', needsPharmacy: false }, (ctx) => { const c = me(ctx); return all('SELECT id,number,subject,notes,status,status_reason,created_at FROM prescriptions WHERE customer_id=? ORDER BY id DESC', c.id); });

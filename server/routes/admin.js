@@ -1,3 +1,4 @@
+import { ensurePharmacyMethods } from '../paymodes.js';
 import { router, audit, paged, can, need, sseHandler, registry } from '../http.js';
 import { get, all, run, insert, tx } from '../db.js';
 import { HttpError, bad, conflict, notFound, forbidden, str, int, oneOf, email as vEmail, toCsv } from '../util.js';
@@ -26,7 +27,7 @@ router.get('/users', { perm: 'users.manage', needsPharmacy: false }, (ctx) => {
   if (ctx.query.role) { w.push('u.role_code=?'); p.push(ctx.query.role); }
   if (ctx.query.pharmacy_id && isSuper(ctx)) { w.push('u.pharmacy_id=?'); p.push(Number(ctx.query.pharmacy_id)); }
   if (ctx.query.q) { w.push('(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`); }
-  return paged(ctx, `SELECT COUNT(*) n FROM users u WHERE ${w.join(' AND ')}`, `SELECT u.id,u.email,u.name,u.phone,u.role_code,u.pharmacy_id,u.status,u.status_reason,u.suspended_until,u.mfa_enabled,u.locked_until,u.last_login_at,u.created_at,u.is_primary,u.avatar_path,ph.name pharmacy_name FROM users u LEFT JOIN pharmacies ph ON ph.id=u.pharmacy_id WHERE ${w.join(' AND ')} ORDER BY u.name`, p);
+  return paged(ctx, `SELECT COUNT(*) n FROM users u WHERE ${w.join(' AND ')}`, `SELECT u.id,u.email,u.name,u.phone,u.role_code,u.pharmacy_id,u.status,u.status_reason,u.suspended_until,u.mfa_enabled,u.locked_until,u.last_login_at,u.created_at,u.is_primary,u.avatar_path,u.country_id,u.see_all_countries,ph.name pharmacy_name FROM users u LEFT JOIN pharmacies ph ON ph.id=u.pharmacy_id WHERE ${w.join(' AND ')} ORDER BY u.name`, p);
 });
 router.get('/users/:id', { perm: 'users.manage', needsPharmacy: false }, (ctx) => {
   const u = loadUser(ctx, ctx.params.id); const { password_hash, mfa_secret, ...pub } = u;
@@ -73,6 +74,8 @@ router.put('/users/:id', { perm: 'users.manage', needsPharmacy: false }, (ctx) =
     if (u.role_code === 'super_admin' && superCount(u.id) < 1) throw conflict('LAST_SUPER_ADMIN', 'Il doit rester au moins un super-administrateur actif');
     upd.role_code = r; if (r === 'super_admin') upd.pharmacy_id = null;
   }
+  if (b.country_id !== undefined && u.role_code === 'customer') { const cid = b.country_id ? int(b.country_id, 'pays', { min: 1 }) : null; if (cid && !get('SELECT 1 FROM countries WHERE id=?', cid)) throw bad('VALIDATION', 'Pays inconnu'); if (cid !== u.country_id) upd.country_id = cid; }
+  if (b.see_all_countries !== undefined && (b.see_all_countries ? 1 : 0) !== u.see_all_countries) { if (!isSuper(ctx)) throw forbidden('Seul le super-administrateur autorise l\'accès aux pharmacies de tous les pays'); upd.see_all_countries = b.see_all_countries ? 1 : 0; }
   if (b.status !== undefined && b.status !== u.status) {
     const st = oneOf(b.status, 'statut', ['active', 'suspended', 'disabled']);
     if (self && st !== 'active') throw forbidden('Vous ne pouvez pas suspendre ou désactiver votre propre compte');
@@ -119,17 +122,28 @@ router.put('/roles/:code/permissions', { perm: 'roles.manage', needsPharmacy: fa
 
 // ---------- établissements & paramètres ----------
 const num = (v, name, lo, hi) => { if (v === undefined || v === null || v === '') return null; const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) throw bad('VALIDATION', `${name} invalide`); return n; };
+// Devises d'une pharmacie : obligatoirement choisies parmi celles du pays (un pays peut en avoir plusieurs) ; la première est la devise principale.
+const curInput = (b, c) => {
+  const allowed = String(c.currencies || '').split(',').filter(Boolean);
+  let list = Array.isArray(b.currencies) ? b.currencies : String(b.currencies ?? '').split(/[\s,;]+/); list = [...new Set(list.map((x) => String(x).toUpperCase().trim()).filter(Boolean))];
+  if (!list.length && b.currency) list = [String(b.currency).toUpperCase().trim()];
+  if (b.currency && !list.includes(String(b.currency).toUpperCase().trim())) list.push(String(b.currency).toUpperCase().trim());
+  if (!list.length) throw bad('VALIDATION', `Choisissez au moins une devise (${allowed.join(', ') || 'devises du pays'})`);
+  for (const x of list) { if (!/^[A-Z]{3}$/.test(x)) throw bad('VALIDATION', 'Code devise invalide'); if (allowed.length && !allowed.includes(x)) throw bad('VALIDATION', `La devise ${x} n'est pas utilisée dans ce pays (${allowed.join(', ')})`); }
+  const main = b.currency && list.includes(String(b.currency).toUpperCase().trim()) ? String(b.currency).toUpperCase().trim() : list[0];
+  return { currency: main, currencies: [main, ...list.filter((x) => x !== main)].join(',') };
+};
 const phInput = (b) => {
   const cid = b.country_id ? int(b.country_id, 'pays', { min: 1 }) : get("SELECT id FROM countries WHERE iso2='TN'")?.id; const c = get('SELECT * FROM countries WHERE id=? AND active=1', cid); if (!c) throw bad('VALIDATION', 'Pays inconnu ou désactivé');
   return { name: str(b.name, 'nom', { required: true, max: 160 }), address: str(b.address, 'adresse', { max: 300 }), city: str(b.city, 'ville', { max: 80 }), country_id: c.id, phone: normalizePhone(b.phone, c.dial_code), email: str(b.email, 'e-mail', { max: 160 }),
     lat: num(b.lat, 'latitude', -90, 90), lng: num(b.lng, 'longitude', -180, 180), opening_hours: str(b.opening_hours, 'horaires', { max: 300 }), public_listed: b.public_listed === undefined ? 1 : b.public_listed ? 1 : 0,
-    currency: str(b.currency || 'TND', 'devise', { max: 8 }), currency_decimals: int(b.currency_decimals ?? 3, 'décimales', { min: 0, max: 4 }), timezone: str(b.timezone || 'Africa/Tunis', 'fuseau', { max: 60 }), invoice_prefix: str(b.invoice_prefix || 'F', 'préfixe', { max: 8 }), legal_notice: str(b.legal_notice, 'mentions légales', { max: 600 }) };
+    ...curInput(b, c), currency_decimals: int(b.currency_decimals ?? 3, 'décimales', { min: 0, max: 4 }), timezone: str(b.timezone || 'Africa/Tunis', 'fuseau', { max: 60 }), invoice_prefix: str(b.invoice_prefix || 'F', 'préfixe', { max: 8 }), legal_notice: str(b.legal_notice, 'mentions légales', { max: 600 }) };
 };
 const phView = (p) => ({ ...p, country: p.country_id ? get('SELECT iso2,name_fr,dial_code FROM countries WHERE id=?', p.country_id) : null, manager: p.manager_user_id ? get('SELECT id,name,email FROM users WHERE id=?', p.manager_user_id) : null, has_logo: !!p.logo_path, logo_url: p.logo_path ? '/api/v1/public/file/' + p.logo_path : null });
 router.get('/pharmacies', { perm: 'settings.manage', needsPharmacy: false }, (ctx) => (ctx.user.role === 'super_admin' ? all('SELECT * FROM pharmacies ORDER BY id') : all('SELECT * FROM pharmacies WHERE id=?', ctx.ph)).map(phView));
 router.post('/pharmacies', { perm: 'pharmacies.manage', needsPharmacy: false }, (ctx) => {
   const o = phInput(ctx.body); const src = ctx.body.copy_catalog_from ? int(ctx.body.copy_catalog_from, 'pharmacie source', { min: 1 }) : null; if (src && !get('SELECT 1 FROM pharmacies WHERE id=?', src)) throw bad('VALIDATION', 'Pharmacie source inconnue');
-  const id = tx(() => { const id = insert(`INSERT INTO pharmacies(${Object.keys(o).join(',')},appointments_enabled) VALUES (${Object.keys(o).map(() => '?').join(',')},?)`, ...Object.values(o), ctx.body.appointments_enabled ? 1 : 0); insert('INSERT INTO cash_registers(pharmacy_id,name) VALUES (?,?)', id, 'Caisse 1');
+  const id = tx(() => { const id = insert(`INSERT INTO pharmacies(${Object.keys(o).join(',')},appointments_enabled) VALUES (${Object.keys(o).map(() => '?').join(',')},?)`, ...Object.values(o), ctx.body.appointments_enabled ? 1 : 0); insert('INSERT INTO cash_registers(pharmacy_id,name) VALUES (?,?)', id, 'Caisse 1'); ensurePharmacyMethods(id);
     if (src) run('INSERT INTO pharmacy_catalog(pharmacy_id,product_id) SELECT ?, product_id FROM pharmacy_catalog WHERE pharmacy_id=?', id, src); audit(ctx, 'pharmacy.create', 'pharmacy', id, undefined, { ...o, copy_catalog_from: src }); return id; });
   return { id };
 });
@@ -160,8 +174,27 @@ router.get('/audit', { perm: 'audit.view', needsPharmacy: false }, (ctx) => {
   for (const [k, c] of [['user_id', 'a.user_id'], ['entity', 'a.entity'], ['action', 'a.action']]) if (ctx.query[k]) { w.push(`${c}=?`); p.push(ctx.query[k]); }
   if (ctx.query.q) { w.push('(a.action LIKE ? OR a.user_email LIKE ? OR a.entity_id LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`); }
   if (ctx.query.from) { w.push('a.created_at >= ?'); p.push(ctx.query.from); } if (ctx.query.to) { w.push('a.created_at <= ?'); p.push(ctx.query.to + ' 23:59:59'); }
-  return paged(ctx, `SELECT COUNT(*) n FROM audit_logs a WHERE ${w.join(' AND ')}`, `SELECT a.* FROM audit_logs a WHERE ${w.join(' AND ')} ORDER BY a.id DESC`, p);
+  const out = paged(ctx, `SELECT COUNT(*) n FROM audit_logs a WHERE ${w.join(' AND ')}`, `SELECT a.* FROM audit_logs a WHERE ${w.join(' AND ')} ORDER BY a.id DESC`, p);
+  return resolveOrigins(out);
 });
+// Appareil lisible à partir du user-agent.
+export function deviceOf(ua) {
+  if (!ua) return null; const u = String(ua);
+  const os = /Windows NT 1[01]/.test(u) ? 'Windows' : /Windows/.test(u) ? 'Windows' : /Android ([\d.]+)/.test(u) ? 'Android ' + u.match(/Android ([\d.]+)/)[1] : /iPhone|iPad|iPod/.test(u) ? 'iOS' : /Mac OS X/.test(u) ? 'macOS' : /CrOS/.test(u) ? 'ChromeOS' : /Linux/.test(u) ? 'Linux' : 'Système inconnu';
+  const br = /Edg\/([\d]+)/.test(u) ? 'Edge ' + u.match(/Edg\/(\d+)/)[1] : /OPR\/([\d]+)/.test(u) ? 'Opera ' + u.match(/OPR\/(\d+)/)[1] : /Firefox\/([\d]+)/.test(u) ? 'Firefox ' + u.match(/Firefox\/(\d+)/)[1] : /Chrome\/([\d]+)/.test(u) ? 'Chrome ' + u.match(/Chrome\/(\d+)/)[1] : /Safari\/[\d.]+/.test(u) && /Version\/([\d]+)/.test(u) ? 'Safari ' + u.match(/Version\/(\d+)/)[1] : /okhttp|Expo|ReactNative/i.test(u) ? 'Application mobile' : /node|curl|python|axios/i.test(u) ? 'Script / API' : 'Navigateur inconnu';
+  const kind = /Mobile|iPhone|Android.*Mobile/.test(u) ? 'Téléphone' : /iPad|Tablet|Android(?!.*Mobile)/.test(u) ? 'Tablette' : 'Ordinateur';
+  return `${kind} · ${os} · ${br}`;
+}
+const isPrivate = (ip) => !ip || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1$|fe80:|fc|fd)/i.test(ip) || ip === 'localhost';
+// Localisation approximative (ville / pays) via un service de géolocalisation d'adresses IP, mise en cache ; l'adresse reste affichée même si le service est injoignable.
+async function resolveOrigins(out) {
+  const ips = [...new Set(out.data.map((a) => a.ip).filter((x) => x && !isPrivate(x)))]; let budget = 8;
+  for (const ip of ips) { if (get('SELECT 1 FROM ip_geo WHERE ip=?', ip) || budget <= 0) continue; budget--;
+    try { const r = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}?fields=success,country,region,city,connection,latitude,longitude`, { signal: AbortSignal.timeout(2500) }); const j = await r.json();
+      if (j.success) run('INSERT OR REPLACE INTO ip_geo(ip,country,region,city,isp,lat,lng) VALUES (?,?,?,?,?,?,?)', ip, j.country || null, j.region || null, j.city || null, j.connection?.isp || null, j.latitude ?? null, j.longitude ?? null); } catch { /* service injoignable : on réessaiera */ } }
+  for (const a of out.data) { const g = a.ip && !isPrivate(a.ip) ? get('SELECT * FROM ip_geo WHERE ip=?', a.ip) : null; a.place = !a.ip ? null : isPrivate(a.ip) ? 'Réseau local / serveur de test' : g ? [g.city, g.region, g.country].filter(Boolean).join(', ') + (g.isp ? ` (${g.isp})` : '') : 'Localisation indisponible'; a.device = deviceOf(a.user_agent); delete a.user_agent; }
+  return out;
+}
 
 // ---------- notifications & temps réel ----------
 router.get('/notifications', { perm: 'dashboard.view', anyPerm: null }, (ctx) => notificationsFor(ctx));

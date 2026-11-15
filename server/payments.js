@@ -4,13 +4,21 @@ import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 import { get, all, run, insert, tx } from './db.js';
 import { decryptJson, encryptJson } from './security.js';
 import { config, audit, notify, publish } from './http.js';
+import { createReceipt, emailReceipt } from './receipts.js';
+import { emitEvent } from './finance.js';
 
 export const PROVIDERS = {
   manual: { label: 'Manuel (espèces, TPE, virement, chèque…)', fields: [] },
   stripe: { label: 'Stripe (carte bancaire)', fields: ['secret_key', 'webhook_secret', 'base_url'] },
   konnect: { label: 'Konnect (Tunisie : carte, e-DINAR, portefeuille)', fields: ['api_key', 'wallet_id', 'base_url'] },
+  generic: { label: 'Passerelle HTTP configurable (agrégateur Mobile Money, PayPal, Wave, crypto… sans modifier l\'application)', fields: ['init_url', 'api_key', 'auth_header', 'body_template', 'ref_path', 'url_path', 'status_url', 'status_path', 'success_values', 'webhook_secret', 'refund_url', 'refund_body_template', 'refund_ref_path'] },
   sandbox: { label: 'Bac à sable (test, sans argent réel)', fields: [] },
 };
+// Champs que l'application ne collecte JAMAIS : codes PIN, mots de passe, numéro/CVV de carte (saisis uniquement chez le prestataire).
+export const FORBIDDEN_FIELD = /pin|pass|pwd|cvv|cvc|card|pan\b|secret|iban|otp/i;
+export const getPath = (o, path) => String(path || '').split('.').filter(Boolean).reduce((a, k) => (a == null ? a : a[k]), o);
+const fill = (tpl, vars) => String(tpl).replace(/\{\{(\w+)\}\}/g, (_, k) => String(vars[k] ?? '').replace(/["\\\n\r]/g, ''));
+export const commissionOf = (m, amount) => Math.round((amount * (m?.commission_bp || 0)) / 10000) + (m?.commission_fixed || 0);
 export const cfgOf = (m) => { try { return m.config ? decryptJson(m.config, config.secret) : {}; } catch { return {}; } };
 export const saveCfg = (obj) => encryptJson(obj, config.secret);
 export const sandboxAllowed = () => !config.prod || process.env.PAYMENT_SANDBOX === 'true';
@@ -43,25 +51,40 @@ export async function startCheckout(op, method, ph, order) {
     const j = await r.json().catch(() => ({})); if (!r.ok || !j.payUrl) throw new Error('Konnect : ' + (j.message || j.errors?.[0]?.message || 'HTTP ' + r.status));
     return { provider_ref: j.paymentRef, checkout_url: j.payUrl };
   }
+  if (method.provider === 'generic') {
+    if (!cfg.init_url) throw new Error('URL de la passerelle manquante');
+    if (config.prod && !/^https:\/\//.test(cfg.init_url)) throw new Error('La passerelle doit utiliser HTTPS en production');
+    const dec = ph.currency_decimals ?? 2, vars = { amount: op.amount, amount_decimal: (op.amount / 10 ** dec).toFixed(dec), currency: op.currency || ph.currency, reference: `OP-${op.id}`, order: order.number, return_url: ret, cancel_url: cancel, webhook_url: `${apiUrl()}/payments/webhook/generic/${method.code}?op=${op.id}`, payer_phone: op.payer_ref || '', payer_email: '' };
+    const headers = { 'content-type': 'application/json' }; if (cfg.api_key) { const [hk, hv] = String(cfg.auth_header || 'Authorization: Bearer {{key}}').split(/:\s*/); headers[hk] = (hv || 'Bearer {{key}}').replace('{{key}}', cfg.api_key); }
+    const r = await fetch(cfg.init_url, { method: 'POST', headers, body: fill(cfg.body_template || '{"amount":"{{amount_decimal}}","currency":"{{currency}}","reference":"{{reference}}","return_url":"{{return_url}}","callback_url":"{{webhook_url}}"}', vars), signal: AbortSignal.timeout(20000) });
+    const j = await r.json().catch(() => ({})); const ref = getPath(j, cfg.ref_path || 'id'), url = getPath(j, cfg.url_path || 'checkout_url');
+    if (!r.ok || !url) throw new Error('Passerelle : ' + (j.message || j.error || 'HTTP ' + r.status));
+    return { provider_ref: String(ref || vars.reference), checkout_url: String(url) };
+  }
   throw new Error('Mode de paiement sans passerelle');
 }
 
 // ---- confirmations ----
 export function markPaid(opId, detail) {
-  return tx(() => {
+  let receiptId = null;
+  const res = tx(() => {
     const op = get('SELECT * FROM online_payments WHERE id=?', opId); if (!op) return null;
     if (op.status === 'paid') return op;
     if (!['pending', 'awaiting_manual', 'failed', 'expired'].includes(op.status)) return op;
-    const m = get('SELECT kind FROM payment_methods WHERE code=?', op.method_code);
+    const m = get('SELECT kind,label FROM payment_methods WHERE code=?', op.method_code);
     const dep = insert('INSERT INTO order_deposits(order_id,method,method_code,amount,session_id,status,user_id) VALUES (?,?,?,?,NULL,?,?)', op.order_id, m?.kind || 'card', op.method_code, op.amount, 'held', op.user_id);
     run("UPDATE online_payments SET status='paid', paid_at=datetime('now'), deposit_id=?, detail=COALESCE(?,detail) WHERE id=?", dep, detail ?? null, op.id);
     const o = get('SELECT number FROM customer_orders WHERE id=?', op.order_id);
+    const rc = createReceipt({ ...op, status: 'paid' }, m?.label || op.method_code); receiptId = rc.id;
     audit({ ph: op.pharmacy_id, user: null, ip: null }, 'payment.online_paid', 'order', op.order_id, undefined, { amount: op.amount, method: op.method_code, ref: op.provider_ref });
-    notify({ pharmacyId: op.pharmacy_id, audience: 'staff', kind: 'payment', title: `Paiement en ligne reçu - ${o.number}` });
-    if (op.user_id) notify({ pharmacyId: op.pharmacy_id, userId: op.user_id, kind: 'payment', title: `Paiement reçu pour ${o.number}`, body: 'Merci, votre paiement est confirmé.' });
+    notify({ pharmacyId: op.pharmacy_id, audience: 'staff', kind: 'payment', title: `Paiement en ligne reçu — ${o.number}`, link: `#/orders?id=${o.id}` });
+    if (op.user_id) notify({ pharmacyId: op.pharmacy_id, userId: op.user_id, kind: 'payment', link: '/portal?tab=receipts', title: `Paiement réussi : ${(op.amount / 10 ** rc.decimals).toFixed(rc.decimals)} ${rc.currency}`, body: `Reçu ${rc.number} · réf. ${rc.reference} · ${rc.method_label} · ${rc.created_at} UTC · statut : payé` });
     publish(op.pharmacy_id, 'order', { id: op.order_id, payment: 'paid' }, op.user_id);
+    emitEvent(op.pharmacy_id, 'payment.paid', { payment_id: op.id, order: o.number, amount: op.amount, currency: rc.currency, method: op.method_code, receipt: rc.number, reference: op.provider_ref });
     return { ...op, status: 'paid' };
   });
+  if (receiptId) setImmediate(async () => { try { const u = get('SELECT u.email FROM online_payments p JOIN users u ON u.id=p.user_id WHERE p.id=?', opId); if (u?.email) await emailReceipt(receiptId, u.email); } catch (e) { console.error('[reçu e-mail]', e.message); } });
+  return res;
 }
 export function markFailed(opId, status = 'failed', detail) {
   const op = get('SELECT * FROM online_payments WHERE id=?', opId); if (!op || op.status === 'paid') return op;
@@ -78,5 +101,12 @@ export async function verifyKonnect(ref, method) {
   const cfg = cfgOf(method), base = (cfg.base_url || 'https://api.konnect.network/api/v2').replace(/\/$/, '');
   const r = await fetch(`${base}/payments/${encodeURIComponent(ref)}`, { headers: { 'x-api-key': cfg.api_key }, signal: AbortSignal.timeout(20000) }); const j = await r.json().catch(() => ({}));
   return r.ok ? j.payment?.status : null;
+}
+export async function verifyGeneric(ref, method) {
+  const cfg = cfgOf(method); if (!cfg.status_url) return null;
+  const headers = {}; if (cfg.api_key) { const [hk, hv] = String(cfg.auth_header || 'Authorization: Bearer {{key}}').split(/:\s*/); headers[hk] = (hv || 'Bearer {{key}}').replace('{{key}}', cfg.api_key); }
+  const r = await fetch(cfg.status_url.replace('{{ref}}', encodeURIComponent(ref)), { headers, signal: AbortSignal.timeout(20000) }); const j = await r.json().catch(() => ({}));
+  if (!r.ok) return null; const st = String(getPath(j, cfg.status_path || 'status') ?? '').toLowerCase();
+  return String(cfg.success_values || 'paid,completed,success,succeeded').toLowerCase().split(/[\s,;]+/).includes(st) ? 'paid' : st || null;
 }
 export const allMethods = () => all('SELECT * FROM payment_methods ORDER BY sort_order, id');

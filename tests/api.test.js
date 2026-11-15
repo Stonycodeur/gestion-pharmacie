@@ -206,7 +206,7 @@ test('commandes : réservation du stock, libération à l\'annulation, retrait �
 });
 
 test('espace client : inscription, catalogue, réservation ; aucun accès au back-office', async () => {
-  const reg = await call('POST', '/auth/register', { name: 'Nouveau Client', email: 'nouveau@client.test', password: 'Motdepasse12' }); assert.equal(reg.status, 201);
+  const reg = await call('POST', '/auth/register', { name: 'Nouveau Client', email: 'nouveau@client.test', password: 'Motdepasse12', country_id: (await call('GET', '/countries')).body.find((c) => c.iso2 === 'TN').id }); assert.equal(reg.status, 201);
   const l = await call('POST', '/auth/login', { email: 'nouveau@client.test', password: 'Motdepasse12' }); const t = l.body.access_token;
   assert.equal((await call('GET', '/stock', null, t)).status, 403); assert.equal((await call('GET', '/customers', null, t)).status, 403); assert.equal((await call('GET', '/sales', null, t)).status, 403);
   const cat = await call('GET', '/portal/catalog?q=parac', null, t); assert.equal(cat.status, 200); assert.ok(cat.body.length); assert.equal('purchase_price' in cat.body[0], false);
@@ -216,7 +216,7 @@ test('espace client : inscription, catalogue, réservation ; aucun accès au bac
 });
 
 test('multi-établissement : isolation des données', async () => {
-  const sa = await login('superadmin'); const ph2 = await call('POST', '/pharmacies', { name: 'Pharmacie Annexe' }, sa); assert.equal(ph2.status, 201);
+  const sa = await login('superadmin'); const ph2 = await call('POST', '/pharmacies', { name: 'Pharmacie Annexe', currency: 'TND' }, sa); assert.equal(ph2.status, 201);
   const u = await call('POST', '/users', { email: 'annexe@demo.local', name: 'Admin Annexe', role_code: 'pharmacy_admin', pharmacy_id: ph2.body.id, password: PW }, sa); assert.equal(u.status, 201);
   const t = (await call('POST', '/auth/login', { email: 'annexe@demo.local', password: PW })).body.access_token;
   const mine = await call('GET', '/sales', null, t); assert.equal(mine.body.total, 0);

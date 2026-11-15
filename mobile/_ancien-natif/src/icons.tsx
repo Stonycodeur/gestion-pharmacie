@@ -1,4 +1,4 @@
-// Icônes SVG (mêmes tracés que le web, couleur au choix) - aucun emoji dans l'interface.
+// Icônes SVG (mêmes tracés que le web, couleur au choix) — aucun emoji dans l'interface.
 import React from 'react';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 type Shape = string | { c: [number, number, number] } | { r: [number, number, number, number, number] };

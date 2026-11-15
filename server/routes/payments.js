@@ -2,7 +2,11 @@
 import { router, audit, can, config } from '../http.js';
 import { get, all, run, insert, tx } from '../db.js';
 import { bad, conflict, notFound, forbidden, str, oneOf, int, HttpError } from '../util.js';
-import { PROVIDERS, cfgOf, saveCfg, startCheckout, markPaid, markFailed, verifyStripe, verifyKonnect, orderTotal, orderPaid, sandboxAllowed } from '../payments.js';
+import { modesFor } from '../paymodes.js';
+import { rateLimit } from '../security.js';
+import { randomInt, createHash } from 'node:crypto';
+import { sendSms, smsEnabled } from '../sms.js';
+import { PROVIDERS, FORBIDDEN_FIELD, commissionOf, cfgOf, saveCfg, startCheckout, markPaid, markFailed, verifyStripe, verifyKonnect, orderTotal, orderPaid, sandboxAllowed } from '../payments.js';
 
 const needSuper = (ctx) => { if (ctx.user.role !== 'super_admin') throw forbidden('Réservé au super-administrateur'); };
 const mask = (m, reveal) => { const cfg = cfgOf(m); const out = { ...m, config: undefined, has_config: Object.fromEntries(Object.keys(PROVIDERS[m.provider]?.fields.length ? Object.fromEntries(PROVIDERS[m.provider].fields.map((f) => [f, 1])) : {}).map((f) => [f, !!cfg[f]])) }; if (reveal) out.config = cfg; return out; };
@@ -55,14 +59,56 @@ router.delete('/payment-methods/:id', { perm: 'settings.manage', needsPharmacy: 
 
 // ---------- portail : payer une commande ----------
 const myCustomer = (ctx) => { const c = get('SELECT * FROM customers WHERE user_id=? LIMIT 1', ctx.user.id); if (!c) throw notFound('Fiche client'); return c; };
+const phoneOf = (m, payer) => { const f = (m.fields ? JSON.parse(m.fields) : []).find((x) => x.type === 'tel'); return String((f && payer?.[f.name]) || payer?.phone || '').replace(/[^\d+]/g, ''); };
+const otpHash = (id, code) => createHash('sha256').update(`${id}:${code}:${process.env.SESSION_SECRET || 'otp'}`).digest('hex');
+// Étape 1 : envoi d'un code à usage unique par SMS au numéro du payeur (le PIN du prestataire n'est JAMAIS saisi ici).
+router.post('/portal/orders/:id/pay/otp', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false, ok200: true }, async (ctx) => {
+  myCustomer(ctx); const o = get('SELECT * FROM customer_orders WHERE id=? AND customer_id IN (SELECT id FROM customers WHERE user_id=?)', ctx.params.id, ctx.user.id); if (!o) throw notFound('Commande');
+  const m = get('SELECT * FROM payment_methods WHERE code=? AND enabled=1 AND channel_online=1 AND otp_required=1', String(ctx.body.method_code || '')); if (!m) throw bad('VALIDATION', 'Ce moyen de paiement ne demande pas de code');
+  const phone = phoneOf(m, ctx.body.payer); if (!/^\+?\d{6,15}$/.test(phone)) throw bad('VALIDATION', 'Numéro de téléphone invalide');
+  if (!rateLimit(`otp:${ctx.user.id}`, 5, 10 * 60000).ok) throw new HttpError(429, 'RATE_LIMIT', 'Trop de demandes de code : patientez quelques minutes');
+  if (!smsEnabled() && config.prod) throw conflict('SMS_UNAVAILABLE', 'L\'envoi de SMS n\'est pas configuré : contactez la pharmacie');
+  const code = String(randomInt(0, 1000000)).padStart(6, '0'), ttl = m.otp_ttl || 120;
+  run("DELETE FROM payment_otps WHERE user_id=? AND order_id=? AND method_code=?", ctx.user.id, o.id, m.code);
+  const id = insert("INSERT INTO payment_otps(user_id,order_id,method_code,phone,code_hash,expires_at) VALUES (?,?,?,?,?,?)", ctx.user.id, o.id, m.code, phone, 'x', new Date(Date.now() + ttl * 1000).toISOString().slice(0, 19).replace('T', ' '));
+  run('UPDATE payment_otps SET code_hash=? WHERE id=?', otpHash(id, code), id);
+  const sent = await sendSms(phone, `Code de confirmation de paiement : ${code} (valable ${Math.round(ttl / 60 * 10) / 10} min). Ne le communiquez à personne.`, { pharmacyId: o.pharmacy_id, userId: ctx.user.id });
+  if (!sent.ok && config.prod) throw conflict('SMS_FAILED', 'Le SMS n\'a pas pu être envoyé');
+  return { ok: true, ttl, ...(config.prod ? {} : { dev_code: code }) };
+});
+const checkOtp = (m, o, ctx, payer) => {
+  if (!m.otp_required) return; const code = String(ctx.body.otp || '').trim(); if (!/^\d{6}$/.test(code)) throw bad('OTP_REQUIRED', 'Saisissez le code reçu par SMS');
+  const r = get("SELECT * FROM payment_otps WHERE user_id=? AND order_id=? AND method_code=? AND used_at IS NULL ORDER BY id DESC LIMIT 1", ctx.user.id, o.id, m.code); if (!r) throw bad('OTP_REQUIRED', 'Demandez d\'abord un code par SMS');
+  if (r.phone !== phoneOf(m, payer)) throw bad('OTP_INVALID', 'Le numéro a changé : redemandez un code');
+  if (r.expires_at < new Date().toISOString().slice(0, 19).replace('T', ' ')) throw bad('OTP_EXPIRED', 'Code expiré : demandez-en un nouveau');
+  if (r.attempts >= 5) throw bad('OTP_LOCKED', 'Trop d\'essais : demandez un nouveau code');
+  if (r.code_hash !== otpHash(r.id, code)) { run('UPDATE payment_otps SET attempts=attempts+1 WHERE id=?', r.id); throw bad('OTP_INVALID', 'Code incorrect'); }
+  run("UPDATE payment_otps SET used_at=datetime('now') WHERE id=?", r.id);
+};
 router.post('/portal/orders/:id/pay', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false, ok200: true }, async (ctx) => {
   const c = myCustomer(ctx); const o = get('SELECT * FROM customer_orders WHERE id=? AND customer_id IN (SELECT id FROM customers WHERE user_id=?)', ctx.params.id, ctx.user.id); if (!o) throw notFound('Commande');
   if (['cancelled', 'expired', 'picked_up'].includes(o.status)) throw conflict('BAD_STATE', 'Cette commande n\'est plus payable');
-  const m = get('SELECT * FROM payment_methods WHERE code=? AND enabled=1 AND channel_online=1', String(ctx.body.method_code || '')); if (!m) throw bad('VALIDATION', 'Mode de paiement indisponible');
+  const m = get('SELECT * FROM payment_methods WHERE code=? AND enabled=1 AND channel_online=1', String(ctx.body.method_code || '')); if (!m || !modesFor(o.pharmacy_id).online.some((x) => x.code === m.code)) throw bad('VALIDATION', 'Mode de paiement indisponible pour cette pharmacie');
   const due = orderTotal(o.id) - orderPaid(o.id) - get("SELECT COALESCE(SUM(amount),0) v FROM online_payments WHERE order_id=? AND status IN ('pending','awaiting_manual')", o.id).v;
   if (due < 1) throw conflict('ALREADY_PAID', 'Rien à payer (déjà réglé ou paiement en cours)');
   const ph = get('SELECT currency,currency_decimals FROM pharmacies WHERE id=?', o.pharmacy_id);
-  const id = insert('INSERT INTO online_payments(pharmacy_id,order_id,customer_id,user_id,method_code,provider,amount,status) VALUES (?,?,?,?,?,?,?,?)', o.pharmacy_id, o.id, o.customer_id, ctx.user.id, m.code, m.provider, due, m.provider === 'manual' ? 'awaiting_manual' : 'pending');
+  // Médicaments sur ordonnance : aucun paiement sans ordonnance du client VALIDÉE par un humain (pharmacien/médecin) couvrant le produit.
+  for (const l of all("SELECT l.product_id, p.name, p.rx_status FROM order_lines l JOIN products p ON p.id=l.product_id WHERE l.order_id=? AND p.rx_status<>'free'", o.id)) {
+    if (l.rx_status === 'controlled') throw conflict('PRESCRIPTION_REQUIRED', `« ${l.name} » est un produit contrôlé : retrait et règlement en pharmacie uniquement`);
+    if (!get("SELECT 1 FROM prescriptions pr JOIN prescription_lines pl ON pl.prescription_id=pr.id WHERE pr.customer_id=? AND pr.pharmacy_id=? AND pl.product_id=? AND pr.status IN ('validated','partially_delivered') AND (pr.valid_until IS NULL OR pr.valid_until>=date('now'))", o.customer_id, o.pharmacy_id, l.product_id))
+      throw conflict('PRESCRIPTION_REQUIRED', `« ${l.name} » nécessite une ordonnance transmise à la pharmacie et validée avant tout paiement`);
+  }
+  // Informations demandées selon le moyen (ex. numéro Mobile Money). Jamais de PIN, mot de passe ni donnée de carte.
+  const bodyKeys = Object.keys(ctx.body || {}).filter((k) => k !== 'method_code' && k !== 'payer' && k !== 'otp'); if (bodyKeys.some((k) => FORBIDDEN_FIELD.test(k))) throw bad('FORBIDDEN_FIELD', 'Cette donnée ne doit jamais être envoyée à l\'application : elle se saisit uniquement sur la page sécurisée du prestataire');
+  const need_ = m.fields ? JSON.parse(m.fields) : []; const payer = ctx.body.payer && typeof ctx.body.payer === 'object' ? ctx.body.payer : {}; const refParts = [];
+  for (const f of need_) { const v = String(payer[f.name] ?? '').trim().slice(0, 60); if (f.required && !v) throw bad('VALIDATION', `${f.label} : champ obligatoire`); if (v && /[<>"'\\]/.test(v)) throw bad('VALIDATION', `${f.label} : caractères non autorisés`); if (v) refParts.push(v); }
+  checkOtp(m, o, ctx, payer);
+  // Détection de fraude (règles simples, journalisées) : trop de tentatives ou d'échecs récents.
+  const flags = []; let risk = 0; const rl = rateLimit(`pay:${ctx.user.id}`, 6, 10 * 60000); if (!rl.ok) { risk += 70; flags.push('rafale de tentatives'); }
+  const fails = get("SELECT COUNT(*) n FROM online_payments WHERE user_id=? AND status IN ('failed','cancelled','expired') AND created_at>datetime('now','-1 hour')", ctx.user.id).n; if (fails >= 3) { risk += 40; flags.push(fails + ' échecs en 1 h'); }
+  if (due > (get("SELECT COALESCE(MAX(amount),0) v FROM online_payments WHERE pharmacy_id=? AND status='paid'", o.pharmacy_id).v || 0) * 5 && due > 100 * 10 ** ph.currency_decimals) { risk += 20; flags.push('montant inhabituel'); }
+  if (risk >= 70) { audit(ctx, 'payment.blocked_risk', 'order', o.id, undefined, { risk, flags }); throw new HttpError(429, 'RISK_BLOCKED', 'Vérification de sécurité : trop de tentatives, réessayez dans quelques minutes'); }
+  const id = insert('INSERT INTO online_payments(pharmacy_id,order_id,customer_id,user_id,method_code,provider,amount,status,currency,commission,ip,payer_ref,risk_score,risk_flags) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', o.pharmacy_id, o.id, o.customer_id, ctx.user.id, m.code, m.provider, due, m.provider === 'manual' ? 'awaiting_manual' : 'pending', ph.currency, commissionOf(m, due), ctx.ip || null, refParts.join(' · ') || null, risk, flags.join('; ') || null);
   audit(ctx, 'payment.online_start', 'order', o.id, undefined, { amount: due, method: m.code });
   if (m.provider === 'manual') return { id, mode: 'manual', amount: due, instructions: m.instructions || 'La pharmacie confirmera la réception de votre paiement.' };
   try { const r = await startCheckout({ id, amount: due }, m, ph, o); run('UPDATE online_payments SET provider_ref=?, checkout_url=? WHERE id=?', r.provider_ref, r.checkout_url, id); return { id, mode: 'redirect', amount: due, checkout_url: r.checkout_url }; }

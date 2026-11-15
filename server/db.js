@@ -36,6 +36,16 @@ const MIGRATIONS = [
   { name: '010_stored_files', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/010_stored_files.sql'), 'utf8') },
   { name: '011_cities', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/011_cities.sql'), 'utf8') },
   { name: '012_appointment_files', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/012_appointment_files.sql'), 'utf8') },
+  { name: '013_payments_v2', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/013_payments_v2.sql'), 'utf8') },
+  { name: '014_driver_network', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/014_driver_network.sql'), 'utf8') },
+  { name: '015_finance_open', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/015_finance_open.sql'), 'utf8') },
+  { name: '016_relaunch', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/016_relaunch.sql'), 'utf8') },
+  { name: '017_pay_otp', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/017_pay_otp.sql'), 'utf8') },
+  { name: '018_rating_moderation', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/018_rating_moderation.sql'), 'utf8') },
+  { name: '019_audit_origin', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/019_audit_origin.sql'), 'utf8') },
+  { name: '020_file_manager', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/020_file_manager.sql'), 'utf8') },
+  { name: '021_country_methods', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/021_country_methods.sql'), 'utf8') },
+  { name: '022_delivery_modes', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/022_delivery_modes.sql'), 'utf8') },
 ];
 // Scripts MariaDB d'évolution (générés par tools/gen-mariadb.js) pour une base déjà installée avec une version plus ancienne
 for (const m of MIGRATIONS) { const f = resolve(here, '../database/mariadb/migrations', m.name + '.sql'); if (existsSync(f)) m.mariadb = () => readFileSync(f, 'utf8'); }

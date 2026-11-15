@@ -14,7 +14,7 @@ const label = (c) => LABELS[c] || c;
 export const money = (v, dec) => (Number(v) / Math.pow(10, dec)).toFixed(dec);
 
 // ---------------- PDF ----------------
-const CP1252 = { '€': 0x80, '‚': 0x82, '„': 0x84, '…': 0x85, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '-': 0x96, '-': 0x97, 'Œ': 0x8c, 'œ': 0x9c };
+const CP1252 = { '€': 0x80, '‚': 0x82, '„': 0x84, '…': 0x85, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, 'Œ': 0x8c, 'œ': 0x9c };
 function enc(s) {
   const out = [];
   for (const ch of String(s ?? '')) {
@@ -39,17 +39,20 @@ class Pdf {
   newPage() { this.cur = []; this.pages.push(this.cur); }
   text(x, y, s, size = 9, bold = false) { this.cur.push(Buffer.concat([Buffer.from(`BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x.toFixed(2)} ${(this.h - y).toFixed(2)} Td (`), enc(s), Buffer.from(') Tj ET\n')])); }
   line(x1, y1, x2, y2, wd = 0.5) { this.cur.push(Buffer.from(`${wd} w ${x1} ${this.h - y1} m ${x2} ${this.h - y2} l S\n`)); }
+  image(x, y, w, h, img) { this.imgs ||= []; const k = 'Im' + (this.imgs.push(img)); (this.pageImgs ||= new Map()); const set = this.pageImgs.get(this.pages.length - 1) || new Set(); set.add(k); this.pageImgs.set(this.pages.length - 1, set); this.cur.push(Buffer.from(`q ${w} 0 0 ${h} ${x} ${this.h - y - h} cm /${k} Do Q\n`)); }
   rect(x, y, w, h, gray) { this.cur.push(Buffer.from(`${gray} g ${x} ${this.h - y - h} ${w} ${h} re f 0 g\n`)); }
   build() {
     const objs = []; const add = (b) => { objs.push(Buffer.isBuffer(b) ? b : Buffer.from(b)); return objs.length; };
     add('<< /Type /Catalog /Pages 2 0 R >>'); add(''); // 2 = pages (rempli plus bas)
     const f1 = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
     const f2 = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
-    const kids = [];
+    const xo = (this.imgs || []).map((im) => { let sm = ''; if (im.alpha) { const a = add(Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${im.alpha.length} >>\nstream\n`), im.alpha, Buffer.from('\nendstream')])); sm = ` /SMask ${a} 0 R`; }
+      return add(Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace ${im.cs} /BitsPerComponent ${im.bpc} /Filter ${im.kind === 'jpeg' ? '/DCTDecode' : '/FlateDecode'}${im.decode || ''}${sm} /Length ${im.data.length} >>\nstream\n`), im.data, Buffer.from('\nendstream')])); });
+    const kids = []; let pi = 0;
     for (const p of this.pages) {
       const body = Buffer.concat(p);
       const c = add(Buffer.concat([Buffer.from(`<< /Length ${body.length} >>\nstream\n`), body, Buffer.from('\nendstream')]));
-      kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${this.w} ${this.h}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >> >> /Contents ${c} 0 R >>`));
+      kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${this.w} ${this.h}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${xo.length ? ` /XObject << ${[...(this.pageImgs?.get(pi) || [])].map((k) => `/${k} ${xo[Number(k.slice(2)) - 1]} 0 R`).join(' ')} >>` : ''} >> /Contents ${c} 0 R >>`)); pi++;
     }
     objs[1] = Buffer.from(`<< /Type /Pages /Kids [${kids.map((k) => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`);
     const parts = [Buffer.from('%PDF-1.4\n')]; const offs = []; let pos = parts[0].length;
@@ -115,7 +118,7 @@ export function pdfReceipt(sale) {
 }
 
 // ---------------- XLSX ----------------
-function zip(files) { // files: [{name, data(Buffer)}] - méthode 0 (stockage), suffisant pour de petits classeurs
+function zip(files) { // files: [{name, data(Buffer)}] — méthode 0 (stockage), suffisant pour de petits classeurs
   const locals = [], centrals = []; let off = 0;
   for (const f of files) {
     const name = Buffer.from(f.name), crc = crc32(f.data), h = Buffer.alloc(30);
@@ -163,3 +166,32 @@ export function xlsx({ sheet = 'Export', columns, rows, dec = 3 }) {
 }
 
 export const toColumns = (cols) => cols.map((k) => ({ key: k, label: label(k), money: MONEY_COLS.has(k) }));
+
+// ---------------- Reçu de paiement (A4) avec QR de vérification ----------------
+// v = { pharmacy:{name,address,phone,email,legal_notice}, receipt:{number,code,payer_name,service,amount,currency,decimals,method_label,reference,created_at,signature}, lines:[{label,qty,unit,total}], tax, verify_url, matrix }
+export function pdfPaymentReceipt(v) {
+  const pdf = new Pdf(595, 842), r = v.receipt, dec = r.decimals, W = 595, M = 48; let y = 60;
+  const lr = (a, b, size = 10, bold = false) => { pdf.text(M, y, fit(a, W - 2 * M - approx(b, size, bold) - 8, size, bold), size, bold); pdf.text(W - M - approx(b, size, bold), y, b, size, bold); y += size + 7; };
+  pdf.rect(0, 0, W, 8, 0.15);
+  let lx = M; if (v.logo) { const lh = 46, lw = Math.min(150, (v.logo.w / v.logo.h) * lh); pdf.image(M, y - 14, lw, lh, v.logo); lx = M + lw + 12; y += 8; }
+  pdf.text(lx, y, fit(v.pharmacy.name, 330 - (lx - M), 20, true), 20, true); pdf.text(W - M - approx('REÇU DE PAIEMENT', 11, true), y - 4, 'REÇU DE PAIEMENT', 11, true); y += 18;
+  if (v.pharmacy.address) { pdf.text(M, y, fit(v.pharmacy.address, 330, 9), 9); y += 12; }
+  if (v.pharmacy.phone || v.pharmacy.email) { pdf.text(M, y, [v.pharmacy.phone && 'Tél. ' + v.pharmacy.phone, v.pharmacy.email].filter(Boolean).join(' · '), 9); y += 12; }
+  y += 8; pdf.line(M, y, W - M, y, 1); y += 20;
+  lr('Reçu n°', r.number, 11, true); lr('Référence de transaction', r.reference || '—'); lr('Date et heure', String(r.created_at).slice(0, 16).replace('T', ' ') + ' UTC');
+  lr('Payeur', r.payer_name || '—'); lr('Moyen de paiement', r.method_label || '—'); lr('Statut', 'Payé'); y += 6; pdf.line(M, y - 4, W - M, y - 4); y += 12;
+  pdf.text(M, y, 'Service payé', 10, true); y += 15; pdf.text(M, y, fit(r.service || '', W - 2 * M, 10), 10); y += 18;
+  for (const l of v.lines) lr(`${l.qty} × ${l.label}`, money(l.total, dec), 9);
+  y += 4; pdf.line(M, y - 2, W - M, y - 2); y += 14;
+  if (v.tax) lr('dont taxes', money(v.tax, dec), 9);
+  lr(`MONTANT PAYÉ (${r.currency})`, money(r.amount, dec), 13, true);
+  if (v.matrix) { const n = v.matrix.length, cell = 3.2, qx = M, qy = y + 30, q = 4; pdf.rect(qx - q * cell, qy - q * cell, (n + 2 * q) * cell, (n + 2 * q) * cell, 1);
+    v.matrix.forEach((row, ry) => row.forEach((on, cx) => { if (on) pdf.rect(qx + cx * cell, qy + ry * cell, cell + 0.15, cell + 0.15, 0); }));
+    const tx = qx + (n + q) * cell + 14; let ty = qy + 6; pdf.text(tx, ty, 'Vérification du reçu', 10, true); ty += 14;
+    for (const s of ['Scannez le QR code ou ouvrez le lien pour vérifier', 'l\'authenticité de ce reçu auprès de la plateforme.']) { pdf.text(tx, ty, s, 8); ty += 11; }
+    ty += 4; pdf.text(tx, ty, fit(v.verify_url, W - M - tx, 7), 7); ty += 12; pdf.text(tx, ty, 'Code : ' + r.code, 8, true); ty += 14;
+    pdf.text(tx, ty, 'Sceau électronique (HMAC-SHA256) :', 7, true); ty += 10; pdf.text(tx, ty, r.signature.slice(0, 32), 7); ty += 9; pdf.text(tx, ty, r.signature.slice(32), 7); y = Math.max(y, qy + n * cell + 20, ty); }
+  y += 40; pdf.line(M, y, W - M, y); y += 14; if (v.pharmacy.legal_notice) { pdf.text(M, y, fit(v.pharmacy.legal_notice, W - 2 * M, 7), 7); y += 10; }
+  pdf.text(M, y, 'Document généré automatiquement ; il reste consultable et archivé dans votre espace.', 7);
+  return pdf.build();
+}

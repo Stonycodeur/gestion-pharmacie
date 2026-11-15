@@ -29,14 +29,35 @@ const AR = {
 };
 Object.assign(EN, { 'Plus': 'More', 'Personnaliser': 'Customize', 'Synchronisation': 'Sync', 'Synchronisation…': 'Syncing…', 'Hors ligne': 'Offline', 'En ligne': 'Online', 'Compte': 'Account', 'à envoyer': 'to send', 'conflit(s)': 'conflict(s)', 'Mode': 'Mode', 'Auto': 'Auto', 'Clair': 'Light', 'Sombre': 'Dark', 'Couleur d\'accent': 'Accent color', 'Densité': 'Density', 'Compacte': 'Compact', 'Confortable': 'Comfortable', 'Aérée': 'Spacious', 'Arrondis': 'Corners', 'Droits': 'Sharp', 'Normaux': 'Normal', 'Très ronds': 'Very round', 'Taille du texte': 'Text size', 'Menu latéral': 'Side menu', 'Adaptatif': 'Adaptive', 'Icônes seules': 'Icons only', 'Contraste': 'Contrast', 'Normal': 'Normal', 'Élevé': 'High', 'Animations': 'Animations', 'Activées': 'On', 'Réduites': 'Reduced', 'Réinitialiser': 'Reset', 'Terminé': 'Done', 'Aperçu': 'Preview', 'Rien à synchroniser': 'Nothing to sync', 'Conflit': 'Conflict', 'Réessayer': 'Retry', 'Vider le cache': 'Clear cache', 'Synchroniser maintenant': 'Sync now', 'Alerte': 'Alert', 'Secondaire': 'Secondary' });
 Object.assign(AR, { 'Plus': 'المزيد', 'Personnaliser': 'تخصيص', 'Synchronisation': 'المزامنة', 'Synchronisation…': 'جارٍ المزامنة…', 'Hors ligne': 'غير متصل', 'En ligne': 'متصل', 'Compte': 'الحساب', 'à envoyer': 'للإرسال', 'conflit(s)': 'تعارض', 'Mode': 'الوضع', 'Auto': 'تلقائي', 'Clair': 'فاتح', 'Sombre': 'داكن', 'Couleur d\'accent': 'لون التمييز', 'Densité': 'الكثافة', 'Compacte': 'مدمجة', 'Confortable': 'مريحة', 'Aérée': 'واسعة', 'Arrondis': 'الزوايا', 'Taille du texte': 'حجم الخط', 'Menu latéral': 'القائمة الجانبية', 'Contraste': 'التباين', 'Animations': 'الحركات', 'Réinitialiser': 'إعادة ضبط', 'Terminé': 'تم', 'Aperçu': 'معاينة', 'Rien à synchroniser': 'لا شيء للمزامنة', 'Conflit': 'تعارض', 'Réessayer': 'إعادة المحاولة', 'Vider le cache': 'مسح الذاكرة المؤقتة', 'Synchroniser maintenant': 'زامن الآن', 'Alerte': 'تنبيه' });
-const DICT = { fr: {}, en: EN, ar: AR };
+import { MORE, MORE_NAMES } from './i18n_more.js';
+const DICT = { fr: {}, en: EN, ar: AR, ...MORE };
+const BUILTIN = [['fr', 'Français'], ['en', 'English'], ['ar', 'العربية'], ...Object.entries(MORE_NAMES)];
+const RTL = new Set(['ar', 'he', 'fa', 'ur', 'ps', 'ku', 'sd']);
+let custom = []; // langues ajoutées par le super-administrateur : [{code,name,rtl}]
+export const languages = () => [...BUILTIN, ...custom.filter((c) => !BUILTIN.some(([k]) => k === c.code)).map((c) => [c.code, c.name])];
+export const isRtl = (l) => RTL.has(l) || custom.some((c) => c.code === l && c.rtl);
+export const seenKeys = new Set(); // libellés demandés pendant la session (alimente l'éditeur de traductions)
 export let lang = (() => { try { return localStorage.getItem('lang') || 'fr'; } catch { return 'fr'; } })();
-export const t = (s) => DICT[lang]?.[s] ?? s;
+export const t = (s) => { if (typeof s === 'string' && s.length < 200) seenKeys.add(s); return DICT[lang]?.[s] ?? (lang !== 'fr' && lang !== 'ar' ? EN[s] : undefined) ?? s; };
+export const knownKeys = () => [...new Set([...Object.keys(EN), ...seenKeys])].sort((a, b) => a.localeCompare(b));
+export const dictOf = (l) => DICT[l] || {};
 export function setLang(l) {
   lang = l; try { localStorage.setItem('lang', l); } catch {}
-  document.documentElement.lang = l; document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
+  document.documentElement.lang = l; document.documentElement.dir = isRtl(l) ? 'rtl' : 'ltr';
+}
+// Charge la liste des langues et le paquet de traductions personnalisé (serveur) ; sans réseau, les langues intégrées restent disponibles.
+export async function loadLanguages() {
+  try { const r = await fetch('/api/v1/i18n/languages'); if (r.ok) { custom = (await r.json()).custom || []; } } catch { /* hors ligne */ }
+  if (!languages().some(([k]) => k === lang)) setLang('fr'); else setLang(lang);
+  await loadPack(lang);
+}
+export async function loadPack(l) {
+  if (['fr'].includes(l)) return;
+  try { const r = await fetch('/api/v1/i18n/pack/' + encodeURIComponent(l)); if (r.ok) { const p = await r.json(); DICT[l] = { ...(DICT[l] || {}), ...(p.strings || {}) }; try { localStorage.setItem('i18n.' + l, JSON.stringify(p.strings || {})); } catch {} return; } } catch { /* hors ligne */ }
+  try { const c = JSON.parse(localStorage.getItem('i18n.' + l) || 'null'); if (c) DICT[l] = { ...(DICT[l] || {}), ...c }; } catch { /* ignoré */ }
 }
 setLang(lang);
-const LOC = { fr: 'fr-TN', en: 'en-GB', ar: 'ar-TN-u-nu-latn' };
-export const fmtDate = (s) => (s ? new Date(s.length <= 10 ? s + 'T00:00:00' : s.replace(' ', 'T') + 'Z').toLocaleString(LOC[lang], s.length <= 10 ? { dateStyle: 'medium' } : { dateStyle: 'short', timeStyle: 'short' }) : '');
-export const fmtNum = (n) => new Intl.NumberFormat(LOC[lang]).format(n);
+const LOC = { fr: 'fr-TN', en: 'en-GB', ar: 'ar-TN-u-nu-latn', es: 'es-ES', pt: 'pt-PT', de: 'de-DE', it: 'it-IT', tr: 'tr-TR' };
+const loc = () => LOC[lang] || lang;
+export const fmtDate = (s) => (s ? new Date(s.length <= 10 ? s + 'T00:00:00' : s.replace(' ', 'T') + 'Z').toLocaleString(loc(), s.length <= 10 ? { dateStyle: 'medium' } : { dateStyle: 'short', timeStyle: 'short' }) : '');
+export const fmtNum = (n) => new Intl.NumberFormat(loc()).format(n);

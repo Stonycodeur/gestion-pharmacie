@@ -13,7 +13,7 @@ export default async function (box) { await loadMethods('pos');
     const s = await get('/sales/' + row.id);
     const body = h('div', {}, h('div', { class: 'row between' }, h('div', {}, h('strong', {}, s.number), ' · ', when(s.created_at)), badge(label[s.status])),
       table([{ label: 'Produit', key: 'product_name' }, { label: 'Lot', key: 'batch_no' }, { label: 'Quantité', num: true, render: (l) => `${l.qty}${l.qty_refunded ? ` (−${l.qty_refunded})` : ''}` }, { label: 'Total', num: true, render: (l) => money(l.line_total) }], s.lines),
-      h('p', {}, h('strong', {}, `${t('Total')} : ${money(s.total)}`), ' - ', s.payments.map((p) => `${methodLabel(p.method)} ${money(p.amount)}`).join(', ')), s.refunds.length ? h('div', { class: 'alert warn' }, s.refunds.map((r) => `${r.number} : ${money(r.amount)} - ${r.reason}`).join(' | ')) : null);
+      h('p', {}, h('strong', {}, `${t('Total')} : ${money(s.total)}`), ' — ', s.payments.map((p) => `${methodLabel(p.method)} ${money(p.amount)}`).join(', ')), s.refunds.length ? h('div', { class: 'alert warn' }, s.refunds.map((r) => `${r.number} : ${money(r.amount)} — ${r.reason}`).join(' | ')) : null);
     const actions = [h('button', { class: 'btn', onclick: () => { m.close(); receipt(s); } }, t('Ticket'))];
     if (can('sales.refund') && s.status !== 'refunded') actions.push(h('button', { class: 'btn danger', onclick: () => { m.close(); refund(s); } }, t('Rembourser')));
     const m = modal(t('Ventes') + ' ' + s.number, body, { wide: true, actions });

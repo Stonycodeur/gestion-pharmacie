@@ -60,23 +60,37 @@ export const SOUNDS = {
   none: { label: 'Silencieux', notes: [] },
 };
 let ctxA = null;
-// Sonnerie choisie sur l'appareil : fichier audio (≤ 1,5 Mo) conservé dans ce navigateur/cette application pour ce compte et cet établissement.
+// Sonnerie choisie sur l'appareil : tout fichier audio (jusqu'à 7 Mo). Les formats « en flux » (MP3/MPEG, OGG, WAV, AAC, FLAC, OPUS) sont conservés coupés à 2 Mo pour économiser l'espace ;
+// les conteneurs (M4A/MP4/WEBM/3GP…) sont conservés entiers car les couper les rendrait illisibles. Le fichier est stocké dans IndexedDB (pas de limite de 5 Mo du localStorage).
 const RING = () => KEY() + '.ring';
+const MAX_RING = 7 * 1024 * 1024, KEEP_RING = 2 * 1024 * 1024;
+const AUDIO_EXT = /\.(mp3|mpeg|mpg|mpga|mp2|wav|wave|ogg|oga|opus|m4a|m4b|mp4|aac|adts|flac|webm|weba|3gp|3gpp|amr|aif|aiff|caf|wma|mka|spx)$/i;
+const STREAMABLE = /\.(mp3|mpeg|mpg|mpga|mp2|wav|wave|ogg|oga|opus|aac|adts|flac|aif|aiff|amr|spx)$/i;
+const idb = () => new Promise((res, rej) => { const r = indexedDB.open('gp-ringtones', 1); r.onupgradeneeded = () => r.result.createObjectStore('rings'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const idbPut = async (k, v) => { const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('rings', 'readwrite'); t.objectStore('rings').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); };
+const idbGet = async (k) => { const d = await idb(); return new Promise((res, rej) => { const q = d.transaction('rings').objectStore('rings').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); };
+const idbDel = async (k) => { const d = await idb(); return new Promise((res) => { const t = d.transaction('rings', 'readwrite'); t.objectStore('rings').delete(k); t.oncomplete = res; t.onerror = res; }); };
+let ringUrl = null, ringUrlKey = null;
 export const customRing = () => { try { return JSON.parse(localStorage.getItem(RING()) || 'null'); } catch { return null; } };
-export function setCustomRing(file) {
-  return new Promise((res, rej) => {
-    if (!file || !/^audio\//.test(file.type || '') && !/\.(mp3|wav|ogg|m4a|aac|opus|webm)$/i.test(file.name)) return rej(new Error('Choisissez un fichier audio (MP3, WAV, OGG, M4A…)'));
-    if (file.size > 1.5 * 1024 * 1024) return rej(new Error('Fichier trop volumineux (1,5 Mo maximum) : choisissez une sonnerie courte'));
-    const r = new FileReader(); r.onerror = () => rej(new Error('Lecture du fichier impossible'));
-    r.onload = () => { try { localStorage.setItem(RING(), JSON.stringify({ name: file.name, url: String(r.result) })); setSoundPrefs({ sound: 'custom' }); res(file.name); } catch { rej(new Error('Espace de stockage plein : choisissez un fichier plus petit')); } };
-    r.readAsDataURL(file);
-  });
+const canPlay = (url) => new Promise((ok) => { const a = new Audio(); const t = setTimeout(() => ok(false), 4000); a.oncanplaythrough = a.onloadedmetadata = () => { clearTimeout(t); ok(true); }; a.onerror = () => { clearTimeout(t); ok(false); }; a.src = url; a.load(); });
+export async function setCustomRing(file) {
+  const name = file?.name || '';
+  if (!file || !(/^(audio|video)\//.test(file.type || '') || AUDIO_EXT.test(name))) throw new Error('Choisissez un fichier audio (MP3, MPEG, WAV, OGG, M4A, AAC, FLAC…)');
+  if (file.size > MAX_RING) throw new Error('Fichier trop volumineux (7 Mo maximum)');
+  const cut = file.size > KEEP_RING && STREAMABLE.test(name || '.mp3');
+  const type = file.type && file.type !== 'video/mpeg' ? file.type : (/\.(mpeg|mpg|mpga|mp2|mp3)$/i.test(name) ? 'audio/mpeg' : file.type || 'audio/mpeg');
+  const blob = new Blob([cut ? file.slice(0, KEEP_RING) : file], { type }), url = URL.createObjectURL(blob);
+  if (!(await canPlay(url))) { URL.revokeObjectURL(url); throw new Error('Cet appareil ne sait pas lire ce fichier : essayez un autre format (MP3, WAV, M4A, OGG)'); }
+  try { await idbPut(RING(), blob); localStorage.setItem(RING(), JSON.stringify({ name, size: blob.size, cut })); } catch { URL.revokeObjectURL(url); throw new Error('Espace de stockage de l\'appareil insuffisant'); }
+  if (ringUrl) URL.revokeObjectURL(ringUrl); ringUrl = url; ringUrlKey = RING(); setSoundPrefs({ sound: 'custom' });
+  return name + (cut ? ' (coupée à 2 Mo)' : '');
 }
-export const clearCustomRing = () => { try { localStorage.removeItem(RING()); if (soundPrefs().sound === 'custom') setSoundPrefs({ sound: 'aurora' }); } catch { /* ignoré */ } };
+export const clearCustomRing = () => { try { localStorage.removeItem(RING()); idbDel(RING()); if (ringUrl) URL.revokeObjectURL(ringUrl); ringUrl = null; if (soundPrefs().sound === 'custom') setSoundPrefs({ sound: 'aurora' }); } catch { /* ignoré */ } };
 let ringAudio = null;
+async function ringSrc() { if (ringUrl && ringUrlKey === RING()) return ringUrl; const b = await idbGet(RING()).catch(() => null); if (!b) return null; ringUrl = URL.createObjectURL(b); ringUrlKey = RING(); return ringUrl; }
 function playCustom(volume) {
-  const c = customRing(); if (!c) return false;
-  try { ringAudio?.pause(); ringAudio = new Audio(c.url); ringAudio.volume = Math.min(1, Math.max(0, volume)); ringAudio.play().catch(() => {}); setTimeout(() => ringAudio?.pause(), 8000); return true; } catch { return false; }
+  if (!customRing()) return false;
+  ringSrc().then((src) => { if (!src) return; ringAudio?.pause(); ringAudio = new Audio(src); ringAudio.volume = Math.min(1, Math.max(0, volume)); ringAudio.play().catch(() => {}); setTimeout(() => ringAudio?.pause(), 10000); }).catch(() => {}); return true;
 }
 export function playSound(id = 'aurora', volume = 0.6) {
   if (id === 'custom') { if (playCustom(volume)) return; id = 'aurora'; }
@@ -115,7 +129,7 @@ const sv = (tag, attrs = {}, ...kids) => { const e = document.createElementNS(NS
 // Itinéraire guidé : Google Maps (ou l'application Maps de l'appareil) depuis la position de l'utilisateur ; dans l'application mobile le lien s'ouvre dans Maps.
 export const directionsUrl = (lat, lng) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
 export const directionsLink = (lat, lng, label = 'Itinéraire', cls = 'btn sm') => h('a', { class: cls, href: directionsUrl(lat, lng), target: '_blank', rel: 'noopener noreferrer', 'aria-label': label + ' (Google Maps)' }, icon('navigate', { size: 14 }), label);
-export function mapView({ points = [], path = [], height = 280 } = {}) {
+export function mapView({ points = [], path = [], height = 280, stage } = {}) {
   const all = [...points, ...path].filter((p) => p.lat != null && p.lng != null);
   const box = h('div', { class: 'svgmap', style: { height: height + 'px' }, role: 'img', 'aria-label': 'Carte du trajet' });
   if (!all.length) { box.append(h('div', { class: 'empty' }, 'Position indisponible')); return box; }
@@ -140,7 +154,7 @@ export function mapView({ points = [], path = [], height = 280 } = {}) {
     svg.append(g);
   }
   const dest = points.filter((p) => (p.kind === 'pharmacy' || p.kind === 'dest') && p.lat != null);
-  box.append(svg, h('div', { class: 'map-actions' }, dest.map((p) => directionsLink(p.lat, p.lng, 'Itinéraire · ' + (p.label || (p.kind === 'pharmacy' ? 'Pharmacie' : 'Destination'))))), h('small', { class: 'muted map-note' }, 'Schéma des positions réelles. « Itinéraire » ouvre Google Maps pour être guidé.')); return box;
+  box.append(svg, h('div', { class: 'map-actions' }, dest.map((p) => directionsLink(p.lat, p.lng, 'Itinéraire · ' + (p.label || (p.kind === 'pharmacy' ? 'Pharmacie' : 'Destination'))))), h('small', { class: 'muted map-note' }, 'Schéma des positions réelles. « Itinéraire » ouvre Google Maps pour être guidé.')); import('./gmap.js').then((m) => m.upgrade(box, { points, path, height, stage })).catch(() => {}); return box;
 }
 
 // ---------- fichiers : sélection avec aperçu avant envoi, aperçu après envoi (fichier privé servi avec le jeton) ----------

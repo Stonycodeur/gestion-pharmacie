@@ -53,7 +53,7 @@ test('JWT : falsification, alg=none, signature retirée, jeton expiré, mauvais 
 });
 
 test('cloisonnement entre pharmacies et entre clients (IDOR)', async () => {
-  const sa = await login('superadmin'); const ph2 = await call('POST', '/pharmacies', { name: 'Pharmacie Étrangère', code: 'ETR', city: 'Sfax' }, sa); assert.equal(ph2.status, 201, JSON.stringify(ph2.body));
+  const sa = await login('superadmin'); const ph2 = await call('POST', '/pharmacies', { name: 'Pharmacie Étrangère', code: 'ETR', city: 'Sfax', currency: 'TND' }, sa); assert.equal(ph2.status, 201, JSON.stringify(ph2.body));
   const u2 = await call('POST', '/users', { name: 'Admin Autre', email: 'autre@etr.local', role_code: 'pharmacy_admin', pharmacy_id: ph2.body.id, password: 'Autre#Pharma2026' }, sa); assert.equal(u2.status, 201, JSON.stringify(u2.body));
   const t2 = (await call('POST', '/auth/login', { email: 'autre@etr.local', password: 'Autre#Pharma2026' })).body.access_token; assert.ok(t2);
   const ph = await login('pharmacien'); const st = await login('stock');
@@ -77,7 +77,7 @@ test('élévation de privilèges et affectation de masse', async () => {
   assert.equal((await call('POST', '/users', { name: 'Escalade', email: 'esc@x.local', role_code: 'super_admin', password: 'Escalade#2026x' }, ad)).status >= 400, true, 'un admin ne crée pas de super-admin');
   const me = (await call('GET', '/auth/me', null, cs)).body; const uid = me.user?.id || me.id;
   await call('PUT', `/users/${uid}`, { role_code: 'super_admin', status: 'active' }, cs); assert.equal((await call('GET', '/users', null, cs)).status, 403);
-  const reg = await call('POST', '/auth/register', { name: 'Pirate Reg', email: 'pirate@x.local', password: 'Pirate#Pharma2026', role_code: 'super_admin', role: 'super_admin', pharmacy_id: 99, status: 'active' }); 
+  const reg = await call('POST', '/auth/register', { name: 'Pirate Reg', email: 'pirate@x.local', password: 'Pirate#Pharma2026', country_id: (await call('GET', '/countries')).body.find((c) => c.iso2 === 'TN').id, role_code: 'super_admin', role: 'super_admin', pharmacy_id: 99, status: 'active' }); 
   if (reg.status === 201) { const u = (await call('GET', '/users?q=pirate', null, sa)).body.data.find((x) => x.email === 'pirate@x.local'); assert.equal(u.role_code, 'customer'); }
   assert.equal((await call('POST', '/payment-methods', { code: 'zz', label: 'Z', kind: 'card' }, ad)).status, 403, 'seul le super-admin configure les paiements');
   assert.equal((await call('GET', '/payment-methods/1/reveal', null, ad)).status, 403);

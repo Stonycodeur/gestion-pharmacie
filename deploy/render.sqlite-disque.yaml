@@ -1,0 +1,34 @@
+# ⚠ Render + SQLite : exige un disque persistant PAYANT. Non recommandé (préférer render.yaml + MariaDB).
+# Render Blueprint — SQLite + disque persistant (offre payante requise pour le disque).
+# Render : New → Blueprint → choisir le dépôt GitHub. Variables « sync: false » à saisir dans le tableau de bord.
+services:
+  - type: web
+    name: gestion-pharmacie
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: pharmacie-data
+      mountPath: /app/data
+      sizeGB: 5
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: DB_DRIVER, value: sqlite }
+      - { key: DB_FILE, value: /app/data/prod.sqlite }
+      - { key: UPLOAD_DIR, value: /app/data/uploads }
+      - { key: JWT_SECRET, generateValue: true }
+      - { key: SETUP_TOKEN, generateValue: true }
+      - { key: BACKUP_KEY, generateValue: true }
+      - { key: MFA_REQUIRED_FOR_PRIVILEGED, value: "true" }
+      - { key: APP_URL, value: "https://pharmacie.jtconsultingcg.com" }
+      - { key: API_PUBLIC_URL, value: "https://pharmacie.jtconsultingcg.com" }
+      - { key: CORS_ORIGINS, value: "https://pharmacie.jtconsultingcg.com" }
+      - { key: TRUSTED_PROXY, value: "true" }
+      - { key: PAYMENT_SANDBOX, value: "false" }
+      - { key: PUSH_ENABLED, value: "false" }
+      - { key: SMTP_HOST, value: smtp.gmail.com }
+      - { key: SMTP_PORT, value: "587" }
+      - { key: SMTP_USER, value: gillessima69@gmail.com }
+      - { key: SMTP_FROM, value: "Pharmacie <gillessima69@gmail.com>" }
+      - { key: SMTP_PASS, sync: false }

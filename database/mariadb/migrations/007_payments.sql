@@ -8,8 +8,8 @@ CREATE TABLE `payment_methods` (
   `enabled` BIGINT NOT NULL DEFAULT 1,
   `channel_pos` BIGINT NOT NULL DEFAULT 1,
   `channel_online` BIGINT NOT NULL DEFAULT 0,
-  `instructions` VARCHAR(255),
-  `config` VARCHAR(255),
+  `instructions` TEXT,
+  `config` TEXT,
   `sort_order` BIGINT NOT NULL DEFAULT 100,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -25,9 +25,9 @@ CREATE TABLE `online_payments` (
   `amount` BIGINT NOT NULL CHECK (amount > 0),
   `status` VARCHAR(255) NOT NULL DEFAULT 'pending',
   `provider_ref` VARCHAR(255),
-  `checkout_url` VARCHAR(255),
+  `checkout_url` TEXT,
   `deposit_id` BIGINT,
-  `detail` VARCHAR(255),
+  `detail` TEXT,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `paid_at` DATETIME NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

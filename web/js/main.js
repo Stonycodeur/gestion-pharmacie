@@ -2,14 +2,14 @@ import { syncPrefs, stopSync } from './prefsync.js';
 import { emit } from './events.js';
 import { state, api, get, post, refresh, setSession, can, listen, ApiError } from './api.js';
 import { h, clear, toast, fail, formModal, modal, when, icon, skeleton } from './ui.js';
-import { t, lang, setLang } from './i18n.js';
+import { t, lang, setLang, languages, loadLanguages, loadPack } from './i18n.js';
 import { setBrand, getPrefs, setPrefs, isDark, onTheme } from './theme.js';
 import { net, onNet, saveProfile, loadProfile, unlock, wipeAll, setScope, onSent, sync } from './offline.js';
 import { personalize, syncCenter } from './personalize.js';
 import { notifyBeep, enhancePasswords } from './net.js';
 import { nativeReady, nativeLogout, installButton } from './native.js';
 
-const ICON = { help: 'help', files: 'folder', network: 'globe', trash: 'trash', driver: 'car', doctor: 'steth', discover: 'pin', deliveries: 'truck', forecast: 'chart', accounting: 'receipt', dashboard: 'dashboard', pos: 'cart', sales: 'receipt', cash: 'wallet', products: 'pill', stock: 'boxes', purchases: 'truck', inventory: 'clipboard', prescriptions: 'file', customers: 'users', orders: 'bag', reports: 'chart', operations: 'swap', users: 'user', roles: 'shield', audit: 'history', settings: 'sliders', portal: 'store', security: 'lock' };
+const ICON = { help: 'help', files: 'folder', network: 'globe', trash: 'trash', driver: 'car', doctor: 'steth', discover: 'pin', deliveries: 'truck', forecast: 'chart', accounting: 'receipt', finance: 'wallet', dashboard: 'dashboard', pos: 'cart', sales: 'receipt', cash: 'wallet', products: 'pill', stock: 'boxes', purchases: 'truck', inventory: 'clipboard', prescriptions: 'file', customers: 'users', orders: 'bag', reports: 'chart', operations: 'swap', users: 'user', roles: 'shield', audit: 'history', settings: 'sliders', portal: 'store', security: 'lock' };
 const TAB_PREF = ['pos', 'dashboard', 'stock', 'prescriptions', 'orders', 'sales', 'portal'];
 let brandName = '';
 const appName = () => brandName || state.pharmacy?.name || 'Gestion Pharmacie';
@@ -22,7 +22,7 @@ const NAV = [
   ['dashboard', 'Tableau de bord', 'dashboard.view'], ['pos', 'Caisse / Vente', 'sales.create'], ['sales', 'Ventes', 'sales.view'], ['cash', 'Ma caisse', 'cash.use|cash.view_all'],
   ['-', 'Pharmacie'], ['products', 'Produits', 'products.view'], ['stock', 'Stock', 'stock.view'], ['purchases', 'Achats', 'purchases.view'], ['inventory', 'Inventaires', 'inventory.manage'],
   ['-', 'Patients'], ['deliveries', 'Livraisons', 'deliveries.view'], ['prescriptions', 'Ordonnances', 'prescriptions.view'], ['customers', 'Clients', 'customers.view'], ['orders', 'Commandes', 'orders.view'],
-  ['-', 'Pilotage'], ['reports', 'Rapports', 'reports.view'], ['forecast', 'Prévisions', 'forecast.view'], ['accounting', 'Comptabilité', 'accounting.view'], ['operations', 'Opérations', 'transfers.manage|transfers.receive|supplier_returns.manage|supplier_payments.manage|accounting.view'],
+  ['-', 'Pilotage'], ['reports', 'Rapports', 'reports.view'], ['forecast', 'Prévisions', 'forecast.view'], ['accounting', 'Comptabilité', 'accounting.view'], ['finance', 'Finance & API', 'finance.admin'], ['operations', 'Opérations', 'transfers.manage|transfers.receive|supplier_returns.manage|supplier_payments.manage|accounting.view'],
   ['-', 'Administration'], ['users', 'Utilisateurs', 'users.manage'], ['roles', 'Rôles & droits', 'users.manage'], ['audit', 'Journal d\'audit', 'audit.view'], ['settings', 'Paramètres', 'settings.manage'],
   ['-', 'Réseau'], ['help', 'Centre d\'aide', 'help.view|portal.use'], ['files', 'Fichiers', 'files.view'], ['network', 'Établissements & pays', 'pharmacies.manage'], ['trash', 'Corbeille', 'trash.manage'],
   ['driver', 'Espace chauffeur', 'driver.use'], ['doctor', 'Espace médecin', 'doctor.use'],
@@ -43,9 +43,9 @@ function loginScreen(msg) {
     try { const d = await api('POST', '/auth/login', { email: email.value, password: pw.value, otp: needOtp ? otp.value : undefined }); setSession(d); await boot(d); saveProfile(email.value, pw.value, d, state.pharmacy).catch(() => {}); }
     catch (er) { if (er.code === 'OTP_REQUIRED') { needOtp = true; otpRow.style.display = ''; otp.focus(); return; } err.textContent = er.status === 0 ? 'Hors connexion : utilisez le déverrouillage hors ligne si cet appareil a déjà été utilisé.' : er.message; err.style.display = ''; }
   } }, err, h('label', { class: 'f' }, t('E-mail'), email), h('label', { class: 'f' }, t('Mot de passe'), pw), otpRow, h('button', { class: 'btn primary block' }, icon('arrow', { size: 18 }), t('Se connecter')), h('div', { style: { marginTop: '12px', textAlign: 'center' } }, h('a', { href: '#', onclick: (e) => { e.preventDefault(); forgotScreen(); } }, 'Mot de passe oublié ?')));
-  const langSel = h('select', { 'aria-label': t('Langue'), onchange: (e) => { setLang(e.target.value); loginScreen(); } }, [['fr', 'Français'], ['en', 'English'], ['ar', 'العربية']].map(([v, l]) => h('option', { value: v, selected: v === lang }, l)));
+  const langSel = h('select', { 'aria-label': t('Langue'), onchange: async (e) => { setLang(e.target.value); await loadPack(e.target.value); loginScreen(); } }, languages().map(([v, l]) => h('option', { value: v, selected: v === lang }, l)));
   const reg = h('button', { class: 'btn sm', type: 'button', onclick: registerModal }, icon('user', { size: 16 }), 'Créer un compte client');
-  const guest = h('button', { class: 'btn block', type: 'button', style: { marginTop: '10px' }, onclick: async (e) => { const gb = e.currentTarget; gb.disabled = true; try { const d = await api('POST', '/auth/guest', {}); setSession(d); await boot(d); } catch (er) { err.textContent = er.message; err.style.display = ''; gb.disabled = false; } } }, icon('user', { size: 18 }), 'Continuer en tant qu\'invité');
+  const guest = h('button', { class: 'btn block', type: 'button', style: { marginTop: '10px' }, onclick: async (e) => { const gb = e.currentTarget; gb.disabled = true; try { const cid = await askCountry(); if (cid === null) { gb.disabled = false; return; } const d = await api('POST', '/auth/guest', { country_id: cid || undefined }); setSession(d); await boot(d); } catch (er) { err.textContent = er.message; err.style.display = ''; gb.disabled = false; } } }, icon('user', { size: 18 }), 'Continuer en tant qu\'invité');
   app.append(h('main', { class: 'login' }, h('div', { class: 'card' }, h('div', { class: 'brand' }, logo(), h('span', {}, appName())), h('h1', {}, t('Connexion')), form, guest, h('div', { class: 'row between', style: { marginTop: '14px' } }, reg, langSel), (() => { const b = installButton(appName(), 'btn sm block'); return b ? h('div', { style: { marginTop: '10px' } }, b) : null; })())));
   email.focus();
 }
@@ -93,8 +93,15 @@ function setupScreen(st) {
   app.append(h('main', { class: 'login' }, h('div', { class: 'card', style: { width: 'min(520px,100%)' } }, h('div', { class: 'brand' }, logo(), h('span', {}, 'Gestion Pharmacie')), h('h1', {}, 'Première configuration'), h('p', { class: 'sub' }, 'Aucun compte n\'existe encore. Créez votre établissement et le compte super-administrateur ; vous créerez ensuite les autres comptes dans Administration → Utilisateurs.'), form)));
   f.pname.focus();
 }
-function registerModal() {
-  formModal('Créer un compte client', [{ name: 'name', label: 'Nom', required: true }, { name: 'email', label: 'E-mail', type: 'email', required: true }, { name: 'phone', label: 'Téléphone', type: 'phone' }, { name: 'password', label: 'Mot de passe', type: 'password', required: true, hint: '10 caractères min., majuscule, minuscule, chiffre' }, { name: 'marketing_consent', label: 'J\'accepte de recevoir des communications (facultatif)', type: 'checkbox' }],
+// Pays du client : proposé uniquement parmi les pays où une pharmacie existe ; ne demande rien s'il n'y en a qu'un seul.
+async function askCountry() {
+  const cs = await api('GET', '/countries?with_pharmacy=1').catch(() => []); if (cs.length <= 1) return cs[0]?.id || 0;
+  let done = false; return new Promise((res) => { formModal('Votre pays', [{ name: 'country_id', label: 'Pays', type: 'select', required: true, value: cs[0].id, options: cs.map((c) => ({ value: c.id, label: c.name_fr })) }], async (v) => { done = true; res(Number(v.country_id)); }, { submitLabel: 'Continuer', onClose: () => { if (!done) res(null); } }); });
+}
+async function registerModal() {
+  const cs = await api('GET', '/countries?with_pharmacy=1').catch(() => []);
+  if (!cs.length) return toast('Aucune pharmacie n\'est encore disponible : l\'inscription est impossible pour le moment', true);
+  formModal('Créer un compte client', [{ name: 'country_id', label: 'Votre pays', type: 'select', required: true, value: cs[0].id, options: cs.map((c) => ({ value: c.id, label: c.name_fr })), hint: 'Vous aurez accès aux pharmacies de ce pays' }, { name: 'name', label: 'Nom', required: true }, { name: 'email', label: 'E-mail', type: 'email', required: true }, { name: 'phone', label: 'Téléphone', type: 'phone' }, { name: 'password', label: 'Mot de passe', type: 'password', required: true, hint: '10 caractères min., majuscule, minuscule, chiffre' }, { name: 'marketing_consent', label: 'J\'accepte de recevoir des communications (facultatif)', type: 'checkbox' }],
     async (v) => { await post('/auth/register', v); toast('Compte créé, vous pouvez vous connecter'); });
 }
 
@@ -148,7 +155,7 @@ function shell() {
       h('a', { href: '#', onclick: (e) => { e.preventDefault(); closeSheet(); personalize({ onLang: () => { shell(); render(); } }); } }, icon('palette', { size: 24 }), t('Personnaliser')),
       h('a', { href: '#', onclick: (e) => { e.preventDefault(); closeSheet(); syncCenter(); } }, icon('refresh', { size: 24 }), t('Synchronisation')),
       h('a', { href: '#', onclick: (e) => { e.preventDefault(); closeSheet(); logout(); } }, icon('logout', { size: 24 }), t('Déconnexion'))));
-    sheetBg.append(sheet); sheetBg.hidden = false;
+    sheetBg.append(sheet); sheetBg.hidden = false; paintMenuCounters(lastRows);
   };
   if (pages.length > 5) tabbar.append(h('button', { type: 'button', onclick: openSheet, 'aria-label': t('Plus') }, icon('apps', { size: 23 }), h('span', {}, t('Plus')), tabN));
 
@@ -166,7 +173,7 @@ function shell() {
     mi('user', t('Mon profil'), () => { location.hash = '#/profile'; }), mi('palette', t('Personnaliser'), () => personalize({ onLang: () => { shell(); render(); } })), mi('refresh', t('Synchronisation'), () => syncCenter()), ...(installButton() ? [mi('download', t('Installer l\'application'), () => installButton().click())] : []),
     mi(isDark() ? 'sun' : 'moon', t('Thème'), () => setPrefs({ mode: isDark() ? 'light' : 'dark' })), mi('logout', t('Déconnexion'), logout, 'danger')));
   const top = h('header', { class: 'top' }, titleEl, phSel, netChip, bell, acct.wrap);
-  const impbar = state.impersonating ? h('div', { class: 'impbar', role: 'alert' }, icon('user', { size: 16 }), h('span', {}, `Prise de contrôle : vous agissez en tant que ${state.user.name} (${state.user.role}) - actions journalisées`), h('button', { class: 'btn sm', onclick: async () => { try { const d = await refresh(); location.hash = ''; await boot(d); } catch (e) { fail(e); } } }, icon('logout', { size: 14 }), 'Quitter')) : null;
+  const impbar = state.impersonating ? h('div', { class: 'impbar', role: 'alert' }, icon('user', { size: 16 }), h('span', {}, `Prise de contrôle : vous agissez en tant que ${state.user.name} (${state.user.role}) — actions journalisées`), h('button', { class: 'btn sm', onclick: async () => { try { const d = await refresh(); location.hash = ''; await boot(d); } catch (e) { fail(e); } } }, icon('logout', { size: 14 }), 'Quitter')) : null;
   app.append(h('div', { class: 'shell' }, side, h('div', { class: 'main' }, impbar, top, offbar, h('main', { class: 'content', id: 'content', tabIndex: -1 }))), tabbar, sheetBg);
   paintNet(); loadNotifs();
 }
@@ -184,18 +191,32 @@ function paintNet() {
 }
 // Ouvre une notification : va à la page concernée ; sans page associée, affiche le message complet.
 function openNotification(n) {
-  if (n.id) post('/notifications/read', { ids: [n.id] }).then(loadNotifs).catch(() => {});
+  if (n.id) post('/notifications/read', { ids: [n.id] }).then(loadNotifs).catch(() => {}); // lue = retirée de la liste
   if (n.link) { location.hash = String(n.link).startsWith('#') ? n.link : '#/' + n.link; return; }
   modal(n.title, h('div', {}, n.body ? h('p', { style: { whiteSpace: 'pre-wrap' } }, n.body) : h('p', { class: 'muted' }, 'Aucun détail.'), n.created_at ? h('small', { class: 'muted' }, when(n.created_at)) : null));
+}
+// Page visée par une notification (« #/orders?id=5 », « /portal?tab=receipts » → orders / portal) et élément précis (id).
+const linkPage = (l) => String(l || '').replace(/^#?\/?/, '').split('?')[0];
+let lastRows = [];
+function paintMenuCounters(rows) {
+  lastRows = rows;
+  const by = {}; for (const n of rows) { const p = linkPage(n.link); if (p) by[p] = (by[p] || 0) + 1; }
+  document.querySelectorAll('.nav a[data-id],.tabbar a[data-id],.sheet a[data-id]').forEach((a) => { let b = a.querySelector('.nbadge'); const c = by[a.dataset.id] || 0; if (!c) { b?.remove(); return; } if (!b) { b = h('span', { class: 'nbadge', 'aria-hidden': 'true' }); a.append(b); } b.textContent = c > 99 ? '99+' : String(c); a.setAttribute('aria-label', `${a.dataset.label || a.textContent} (${c})`); });
+}
+// Une fois la page affichée, met en évidence (et ouvre) la ligne visée par la notification.
+function focusItem(box, id) {
+  if (!id) return; let tries = 0; const go = () => { const el = [...box.querySelectorAll('[data-rid]')].find((x) => x.dataset.rid === String(id));
+    if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 3000); if (el.tagName === 'TR' && el.style.cursor === 'pointer') el.click(); return; }
+    if (++tries < 20) setTimeout(go, 200); }; go();
 }
 async function loadNotifs() {
   if (state.offline || !net.online) return;
   try {
-    const r = await get(can('dashboard.view') ? '/notifications' : '/portal/notifications'); const rows = r.data || r; const unread = r.unread ?? rows.filter((x) => !x.is_read).length;
-    bellN.textContent = unread; bellN.hidden = !unread; if (tabN) { tabN.textContent = unread; tabN.hidden = !unread; } clear(notifBox);
+    const r = await get(can('dashboard.view') ? '/notifications' : '/portal/notifications'); const rows = (r.data || r).filter((x) => !x.is_read); const unread = rows.length; // une notification lue disparaît de la liste (pas de saturation)
+    paintMenuCounters(rows); bellN.textContent = unread; bellN.hidden = !unread; if (tabN) { tabN.textContent = unread; tabN.hidden = !unread; } clear(notifBox);
     notifBox.append(h('div', { class: 'it row between' }, h('strong', {}, t('Notifications')), h('button', { class: 'btn sm', onclick: async () => { await post('/notifications/read', {}); loadNotifs(); } }, icon('check', { size: 14 }), t('Tout marquer comme lu'))));
-    rows.slice(0, 30).forEach((n) => notifBox.append(h('div', { class: 'it' + (n.is_read ? '' : ' unread'), 'data-link': n.link || '', role: 'link', tabIndex: 0, onkeydown: (e) => { if (e.key === 'Enter') e.currentTarget.click(); }, onclick: () => { notifBox.hidden = true; openNotification(n); } }, h('div', {}, n.title), n.body ? h('small', {}, n.body) : null, h('div', {}, h('small', { class: 'muted' }, when(n.created_at))))));
-    if (!rows.length) notifBox.append(h('div', { class: 'empty' }, icon('bell'), t('Aucun résultat')));
+    rows.slice(0, 30).forEach((n) => notifBox.append(h('div', { class: 'it' + (n.is_read ? '' : ' unread'), 'data-link': n.link || '', role: 'link', tabIndex: 0, onkeydown: (e) => { if (e.key === 'Enter') e.currentTarget.click(); }, onclick: (e) => { notifBox.hidden = true; e.currentTarget.remove(); openNotification(n); } }, h('div', {}, n.title), n.body ? h('small', {}, n.body) : null, h('div', {}, h('small', { class: 'muted' }, when(n.created_at))))));
+    if (!rows.length) notifBox.append(h('div', { class: 'empty' }, icon('bell'), t('Aucune nouvelle notification')));
   } catch {}
 }
 async function logout() {
@@ -217,7 +238,7 @@ async function render() {
   const token = (current = Symbol());
   try {
     const mod = await import(`./pages/${id}.js`); if (token !== current) return;
-    const out = h('div', {}); await mod.default(out); if (token !== current) return; clear(box).append(out); box.focus({ preventScroll: true }); box.style.animation = 'none'; void box.offsetWidth; box.style.animation = '';
+    const out = h('div', {}); await mod.default(out); if (token !== current) return; clear(box).append(out); focusItem(box, new URLSearchParams(location.hash.split('?')[1] || '').get('id')); box.focus({ preventScroll: true }); box.style.animation = 'none'; void box.offsetWidth; box.style.animation = '';
   } catch (e) { if (token !== current) return; clear(box).append(h('div', { class: 'alert bad' }, icon('alert', { size: 18 }), h('span', {}, e.status === 0 ? 'Cette page n\'a pas encore été consultée sur cet appareil : elle n\'est pas disponible hors connexion.' : e.message || String(e)))); if (e.status !== 0) console.error(e); }
 }
 window.addEventListener('hashchange', () => state.token && render());
@@ -233,6 +254,7 @@ onNet(async (n) => { if (n.online && state.offline) { try { const d = await refr
 onSent((it, r) => { toast(`${r?.number || it.label || ''} · ${t('synchronisée')}`); });
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('/sw.js').catch(() => {});
 (async () => {
+  await loadLanguages().catch(() => {});
   try { const b = await fetch('/api/v1/branding').then((r) => (r.ok ? r.json() : null)); if (b) { brandName = b.name || ''; setBrand(b.color); } } catch { const c = await loadProfile(); if (c?.pharmacy?.name) brandName = c.pharmacy.name; }
   const rt = location.hash.match(/^#\/reset\?token=([\w-]+)/); if (rt) return resetScreen(rt[1]);
   try { const d = await refresh(); await boot(d); }

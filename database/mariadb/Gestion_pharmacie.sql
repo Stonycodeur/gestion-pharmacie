@@ -24,7 +24,8 @@ CREATE TABLE `pharmacies` (
   `manager_user_id` BIGINT,
   `appointments_enabled` BIGINT NOT NULL DEFAULT 0,
   `opening_hours` VARCHAR(255),
-  `public_listed` BIGINT NOT NULL DEFAULT 1
+  `public_listed` BIGINT NOT NULL DEFAULT 1,
+  `currencies` TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `settings` (
@@ -75,7 +76,9 @@ CREATE TABLE `users` (
   `is_primary` BIGINT NOT NULL DEFAULT 0,
   `avatar_path` VARCHAR(255),
   `is_guest` BIGINT NOT NULL DEFAULT 0,
-  `created_by` BIGINT
+  `created_by` BIGINT,
+  `country_id` BIGINT,
+  `see_all_countries` BIGINT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `refresh_tokens` (
@@ -109,7 +112,8 @@ CREATE TABLE `audit_logs` (
   `old_json` TEXT,
   `new_json` TEXT,
   `ip` VARCHAR(255),
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `user_agent` VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `categories` (
@@ -476,7 +480,10 @@ CREATE TABLE `customer_orders` (
   `notes` TEXT,
   `created_by` BIGINT,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `wants_delivery` BIGINT,
+  `pay_mode` VARCHAR(255),
+  `pay_method_code` VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `order_lines` (
@@ -659,10 +666,20 @@ CREATE TABLE `payment_methods` (
   `enabled` BIGINT NOT NULL DEFAULT 1,
   `channel_pos` BIGINT NOT NULL DEFAULT 1,
   `channel_online` BIGINT NOT NULL DEFAULT 0,
-  `instructions` VARCHAR(255),
-  `config` VARCHAR(255),
+  `instructions` TEXT,
+  `config` TEXT,
   `sort_order` BIGINT NOT NULL DEFAULT 100,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `countries` TEXT,
+  `currencies` TEXT,
+  `commission_bp` BIGINT NOT NULL DEFAULT 0,
+  `commission_fixed` BIGINT NOT NULL DEFAULT 0,
+  `family` VARCHAR(255),
+  `fields` TEXT,
+  `merchant_account` TEXT,
+  `payout` VARCHAR(255) NOT NULL DEFAULT 'deferred',
+  `otp_required` BIGINT NOT NULL DEFAULT 0,
+  `otp_ttl` BIGINT NOT NULL DEFAULT 120
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `online_payments` (
@@ -676,11 +693,18 @@ CREATE TABLE `online_payments` (
   `amount` BIGINT NOT NULL CHECK (amount > 0),
   `status` VARCHAR(255) NOT NULL DEFAULT 'pending',
   `provider_ref` VARCHAR(255),
-  `checkout_url` VARCHAR(255),
+  `checkout_url` TEXT,
   `deposit_id` BIGINT,
-  `detail` VARCHAR(255),
+  `detail` TEXT,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `paid_at` DATETIME NULL DEFAULT NULL
+  `paid_at` DATETIME NULL DEFAULT NULL,
+  `currency` VARCHAR(255),
+  `commission` BIGINT NOT NULL DEFAULT 0,
+  `ip` VARCHAR(255),
+  `payer_ref` VARCHAR(255),
+  `refunded` BIGINT NOT NULL DEFAULT 0,
+  `risk_score` BIGINT NOT NULL DEFAULT 0,
+  `risk_flags` TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `drivers` (
@@ -705,7 +729,12 @@ CREATE TABLE `drivers` (
   `lng` DOUBLE,
   `loc_at` DATETIME NULL DEFAULT NULL,
   `rating_sum` BIGINT NOT NULL DEFAULT 0,
-  `rating_count` BIGINT NOT NULL DEFAULT 0
+  `rating_count` BIGINT NOT NULL DEFAULT 0,
+  `photo_file` VARCHAR(255),
+  `id_doc_file` VARCHAR(255),
+  `id_doc_type` VARCHAR(255),
+  `id_doc_number` VARCHAR(255),
+  `home_address` VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `deliveries` (
@@ -731,7 +760,17 @@ CREATE TABLE `deliveries` (
   `eta_max` BIGINT,
   `driver_response` VARCHAR(255) NOT NULL DEFAULT 'none',
   `cancelled_by` VARCHAR(255),
-  `cancel_reason` VARCHAR(255)
+  `cancel_reason` VARCHAR(255),
+  `offer_mode` VARCHAR(255) NOT NULL DEFAULT 'driver',
+  `picked_up_at` DATETIME NULL DEFAULT NULL,
+  `accepted_at` DATETIME NULL DEFAULT NULL,
+  `standard_fee` BIGINT,
+  `relaunch_status` VARCHAR(255),
+  `relaunch_reason` VARCHAR(255),
+  `relaunch_requested_at` DATETIME NULL DEFAULT NULL,
+  `mode` VARCHAR(255) NOT NULL DEFAULT 'standard',
+  `scheduled_at` DATETIME NULL DEFAULT NULL,
+  `reminder_sent` BIGINT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `delivery_events` (
@@ -826,7 +865,8 @@ CREATE TABLE `countries` (
   `flag_svg` VARCHAR(255),
   `phone_min` BIGINT NOT NULL DEFAULT 6,
   `phone_max` BIGINT NOT NULL DEFAULT 12,
-  `active` BIGINT NOT NULL DEFAULT 1
+  `active` BIGINT NOT NULL DEFAULT 1,
+  `currencies` TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `pharmacy_catalog` (
@@ -905,7 +945,9 @@ CREATE TABLE `delivery_messages` (
   `sender_user_id` BIGINT NOT NULL,
   `sender_role` VARCHAR(255) NOT NULL,
   `body` TEXT NOT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `file` VARCHAR(255),
+  `file_name` VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `delivery_ratings` (
@@ -916,7 +958,10 @@ CREATE TABLE `delivery_ratings` (
   `stars` BIGINT NOT NULL CHECK (stars BETWEEN 1 AND 5),
   `comment` VARCHAR(255),
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (`delivery_id`, `target`)
+  UNIQUE (`delivery_id`, `target`),
+  `status` VARCHAR(255) NOT NULL DEFAULT 'pending',
+  `reviewed_by` BIGINT,
+  `reviewed_at` DATETIME NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `delivery_reports` (
@@ -927,7 +972,9 @@ CREATE TABLE `delivery_reports` (
   `reason` TEXT NOT NULL,
   `details` VARCHAR(255),
   `status` VARCHAR(255) NOT NULL DEFAULT 'open' CHECK (status IN ('open','reviewed','dismissed')),
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `file` VARCHAR(255),
+  `file_name` VARCHAR(255)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `appointment_slots` (
@@ -969,6 +1016,250 @@ CREATE TABLE `cities` (
   `country_id` BIGINT NOT NULL,
   `name` VARCHAR(255) NOT NULL,
   UNIQUE (`country_id`, `name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `receipts` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT NOT NULL,
+  `number` VARCHAR(255) NOT NULL UNIQUE,
+  `code` VARCHAR(255) NOT NULL UNIQUE,
+  `online_payment_id` BIGINT NOT NULL,
+  `order_id` BIGINT,
+  `customer_id` BIGINT,
+  `payer_name` VARCHAR(255),
+  `service` TEXT,
+  `amount` BIGINT NOT NULL,
+  `currency` VARCHAR(255) NOT NULL,
+  `decimals` BIGINT NOT NULL DEFAULT 2,
+  `method_label` VARCHAR(255),
+  `reference` VARCHAR(255),
+  `signature` VARCHAR(255) NOT NULL,
+  `emailed_at` DATETIME NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `payment_refunds` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `online_payment_id` BIGINT NOT NULL,
+  `pharmacy_id` BIGINT NOT NULL,
+  `amount` BIGINT NOT NULL CHECK (amount > 0),
+  `reason` TEXT,
+  `user_id` BIGINT,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gateway_status` VARCHAR(255) NOT NULL DEFAULT 'manual',
+  `gateway_ref` VARCHAR(255),
+  `gateway_error` VARCHAR(255)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `currency_rates` (
+  `code` VARCHAR(255) PRIMARY KEY,
+  `per_eur` DOUBLE NOT NULL,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `file_scans` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(255),
+  `mime` VARCHAR(255),
+  `size` BIGINT,
+  `sha256` VARCHAR(255),
+  `verdict` VARCHAR(255) NOT NULL,
+  `reason` TEXT,
+  `engine` VARCHAR(255),
+  `user_id` BIGINT,
+  `ip` VARCHAR(255),
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `payouts` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT NOT NULL,
+  `amount` BIGINT NOT NULL CHECK (amount > 0),
+  `currency` VARCHAR(255) NOT NULL,
+  `reference` VARCHAR(255),
+  `note` VARCHAR(255),
+  `user_id` BIGINT,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `driver_pharmacies` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `driver_id` BIGINT NOT NULL,
+  `pharmacy_id` BIGINT NOT NULL,
+  `depart_lat` DOUBLE,
+  `depart_lng` DOUBLE,
+  `depart_label` VARCHAR(255),
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (`driver_id`, `pharmacy_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `delivery_offers` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `delivery_id` BIGINT NOT NULL,
+  `driver_id` BIGINT NOT NULL,
+  `kind` VARCHAR(255) NOT NULL DEFAULT 'standard' CHECK (kind IN ('standard','counter')),
+  `price` BIGINT NOT NULL CHECK (price >= 0),
+  `standard_price` BIGINT NOT NULL,
+  `distance_m` BIGINT,
+  `eta_min` BIGINT,
+  `eta_max` BIGINT,
+  `status` VARCHAR(255) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','chosen','rejected','withdrawn')),
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (`delivery_id`, `driver_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `platform_settings` (
+  `skey` VARCHAR(255) PRIMARY KEY,
+  `svalue` VARCHAR(1000),
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `subscriptions` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT NOT NULL,
+  `customer_id` BIGINT NOT NULL,
+  `label` VARCHAR(255) NOT NULL,
+  `amount` BIGINT NOT NULL CHECK (amount > 0),
+  `currency` VARCHAR(255) NOT NULL,
+  `period` VARCHAR(255) NOT NULL DEFAULT 'month',
+  `next_run` VARCHAR(255) NOT NULL,
+  `ends_on` VARCHAR(255),
+  `status` VARCHAR(255) NOT NULL DEFAULT 'active',
+  `method_code` VARCHAR(255),
+  `runs` BIGINT NOT NULL DEFAULT 0,
+  `created_by` BIGINT,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `subscription_invoices` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `subscription_id` BIGINT NOT NULL,
+  `pharmacy_id` BIGINT NOT NULL,
+  `customer_id` BIGINT NOT NULL,
+  `number` VARCHAR(255) NOT NULL UNIQUE,
+  `amount` BIGINT NOT NULL,
+  `currency` VARCHAR(255) NOT NULL,
+  `due_on` VARCHAR(255) NOT NULL,
+  `status` VARCHAR(255) NOT NULL DEFAULT 'due',
+  `paid_at` DATETIME NULL DEFAULT NULL,
+  `method_code` VARCHAR(255),
+  `reference` VARCHAR(255),
+  `reminded_at` DATETIME NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `kyc_records` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT NOT NULL UNIQUE,
+  `holder_name` VARCHAR(255) NOT NULL,
+  `doc_type` VARCHAR(255) NOT NULL,
+  `doc_number` VARCHAR(255),
+  `doc_file` VARCHAR(255) NOT NULL,
+  `proof_file` VARCHAR(255),
+  `status` VARCHAR(255) NOT NULL DEFAULT 'pending',
+  `note` VARCHAR(255),
+  `submitted_by` BIGINT,
+  `reviewed_by` BIGINT,
+  `reviewed_at` DATETIME NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `sms_log` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT,
+  `user_id` BIGINT,
+  `phone` VARCHAR(255),
+  `body` TEXT,
+  `status` VARCHAR(255) NOT NULL,
+  `error` VARCHAR(255),
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `api_keys` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT,
+  `name` VARCHAR(255) NOT NULL,
+  `prefix` VARCHAR(255) NOT NULL,
+  `key_hash` VARCHAR(255) NOT NULL UNIQUE,
+  `scopes` VARCHAR(255) NOT NULL DEFAULT 'payments:read',
+  `created_by` BIGINT,
+  `last_used_at` DATETIME NULL DEFAULT NULL,
+  `revoked_at` DATETIME NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `webhook_endpoints` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT,
+  `url` VARCHAR(255) NOT NULL,
+  `secret` VARCHAR(255) NOT NULL,
+  `events` VARCHAR(255) NOT NULL DEFAULT 'payment.paid,payment.refunded',
+  `active` BIGINT NOT NULL DEFAULT 1,
+  `last_status` VARCHAR(255),
+  `last_at` DATETIME NULL DEFAULT NULL,
+  `created_by` BIGINT,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `payment_otps` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `order_id` BIGINT NOT NULL,
+  `method_code` VARCHAR(255) NOT NULL,
+  `phone` VARCHAR(255) NOT NULL,
+  `code_hash` VARCHAR(255) NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `attempts` BIGINT NOT NULL DEFAULT 0,
+  `used_at` DATETIME NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `ip_geo` (
+  `ip` VARCHAR(255) PRIMARY KEY,
+  `country` VARCHAR(255),
+  `region` VARCHAR(255),
+  `city` VARCHAR(255),
+  `isp` VARCHAR(255),
+  `lat` DOUBLE,
+  `lng` DOUBLE,
+  `fetched_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `fm_nodes` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `owner_user_id` BIGINT NOT NULL,
+  `pharmacy_id` BIGINT,
+  `parent_id` BIGINT,
+  `kind` VARCHAR(255) NOT NULL CHECK (kind IN ('folder','file')),
+  `name` VARCHAR(255) NOT NULL,
+  `stored_name` VARCHAR(255),
+  `mime` VARCHAR(255),
+  `size` BIGINT NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `fm_shares` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `node_id` BIGINT NOT NULL,
+  `target_type` VARCHAR(255) NOT NULL CHECK (target_type IN ('user','pharmacy')),
+  `target_id` BIGINT NOT NULL,
+  `can_edit` BIGINT NOT NULL DEFAULT 0,
+  `shared_by` BIGINT NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (`node_id`, `target_type`, `target_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `pharmacy_payment_methods` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `pharmacy_id` BIGINT NOT NULL,
+  `method_code` VARCHAR(255) NOT NULL,
+  `enabled` BIGINT NOT NULL DEFAULT 1,
+  `at_counter` BIGINT NOT NULL DEFAULT 0,
+  `on_delivery` BIGINT NOT NULL DEFAULT 0,
+  `online` BIGINT NOT NULL DEFAULT 0,
+  UNIQUE (`pharmacy_id`, `method_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
@@ -1136,6 +1427,40 @@ ALTER TABLE `appointments` ADD CONSTRAINT `fk_appointments_pharmacy_id` FOREIGN 
 ALTER TABLE `appointments` ADD CONSTRAINT `fk_appointments_slot_id` FOREIGN KEY (`slot_id`) REFERENCES `appointment_slots` (`id`);
 ALTER TABLE `appointments` ADD CONSTRAINT `fk_appointments_customer_user_id` FOREIGN KEY (`customer_user_id`) REFERENCES `users` (`id`);
 ALTER TABLE `cities` ADD CONSTRAINT `fk_cities_country_id` FOREIGN KEY (`country_id`) REFERENCES `countries` (`id`) ON DELETE CASCADE;
+ALTER TABLE `receipts` ADD CONSTRAINT `fk_receipts_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `receipts` ADD CONSTRAINT `fk_receipts_online_payment_id` FOREIGN KEY (`online_payment_id`) REFERENCES `online_payments` (`id`);
+ALTER TABLE `receipts` ADD CONSTRAINT `fk_receipts_order_id` FOREIGN KEY (`order_id`) REFERENCES `customer_orders` (`id`);
+ALTER TABLE `receipts` ADD CONSTRAINT `fk_receipts_customer_id` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`);
+ALTER TABLE `payment_refunds` ADD CONSTRAINT `fk_payment_refunds_online_payment_id` FOREIGN KEY (`online_payment_id`) REFERENCES `online_payments` (`id`);
+ALTER TABLE `payment_refunds` ADD CONSTRAINT `fk_payment_refunds_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `payment_refunds` ADD CONSTRAINT `fk_payment_refunds_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`);
+ALTER TABLE `payouts` ADD CONSTRAINT `fk_payouts_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `payouts` ADD CONSTRAINT `fk_payouts_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`);
+ALTER TABLE `driver_pharmacies` ADD CONSTRAINT `fk_driver_pharmacies_driver_id` FOREIGN KEY (`driver_id`) REFERENCES `drivers` (`id`);
+ALTER TABLE `driver_pharmacies` ADD CONSTRAINT `fk_driver_pharmacies_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `delivery_offers` ADD CONSTRAINT `fk_delivery_offers_delivery_id` FOREIGN KEY (`delivery_id`) REFERENCES `deliveries` (`id`);
+ALTER TABLE `delivery_offers` ADD CONSTRAINT `fk_delivery_offers_driver_id` FOREIGN KEY (`driver_id`) REFERENCES `drivers` (`id`);
+ALTER TABLE `subscriptions` ADD CONSTRAINT `fk_subscriptions_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `subscriptions` ADD CONSTRAINT `fk_subscriptions_customer_id` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`);
+ALTER TABLE `subscriptions` ADD CONSTRAINT `fk_subscriptions_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`);
+ALTER TABLE `subscription_invoices` ADD CONSTRAINT `fk_subscription_invoices_subscription_id` FOREIGN KEY (`subscription_id`) REFERENCES `subscriptions` (`id`);
+ALTER TABLE `subscription_invoices` ADD CONSTRAINT `fk_subscription_invoices_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `subscription_invoices` ADD CONSTRAINT `fk_subscription_invoices_customer_id` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`);
+ALTER TABLE `kyc_records` ADD CONSTRAINT `fk_kyc_records_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `kyc_records` ADD CONSTRAINT `fk_kyc_records_submitted_by` FOREIGN KEY (`submitted_by`) REFERENCES `users` (`id`);
+ALTER TABLE `kyc_records` ADD CONSTRAINT `fk_kyc_records_reviewed_by` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`);
+ALTER TABLE `api_keys` ADD CONSTRAINT `fk_api_keys_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `api_keys` ADD CONSTRAINT `fk_api_keys_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`);
+ALTER TABLE `webhook_endpoints` ADD CONSTRAINT `fk_webhook_endpoints_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`);
+ALTER TABLE `webhook_endpoints` ADD CONSTRAINT `fk_webhook_endpoints_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`);
+ALTER TABLE `payment_otps` ADD CONSTRAINT `fk_payment_otps_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+ALTER TABLE `payment_otps` ADD CONSTRAINT `fk_payment_otps_order_id` FOREIGN KEY (`order_id`) REFERENCES `customer_orders` (`id`) ON DELETE CASCADE;
+ALTER TABLE `fm_nodes` ADD CONSTRAINT `fk_fm_nodes_owner_user_id` FOREIGN KEY (`owner_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+ALTER TABLE `fm_nodes` ADD CONSTRAINT `fk_fm_nodes_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`) ON DELETE SET NULL;
+ALTER TABLE `fm_nodes` ADD CONSTRAINT `fk_fm_nodes_parent_id` FOREIGN KEY (`parent_id`) REFERENCES `fm_nodes` (`id`) ON DELETE CASCADE;
+ALTER TABLE `fm_shares` ADD CONSTRAINT `fk_fm_shares_node_id` FOREIGN KEY (`node_id`) REFERENCES `fm_nodes` (`id`) ON DELETE CASCADE;
+ALTER TABLE `fm_shares` ADD CONSTRAINT `fk_fm_shares_shared_by` FOREIGN KEY (`shared_by`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+ALTER TABLE `pharmacy_payment_methods` ADD CONSTRAINT `fk_pharmacy_payment_methods_pharmacy_id` FOREIGN KEY (`pharmacy_id`) REFERENCES `pharmacies` (`id`) ON DELETE CASCADE;
 
 -- Index
 CREATE INDEX `idx_batches_product` ON `batches` (`product_id`);
@@ -1176,6 +1501,17 @@ CREATE INDEX `idx_dmsg` ON `delivery_messages` (`delivery_id`);
 CREATE INDEX `idx_slots` ON `appointment_slots` (`pharmacy_id`, `starts_at`);
 CREATE INDEX `idx_appt_user` ON `appointments` (`customer_user_id`);
 CREATE INDEX `idx_cities_country` ON `cities` (`country_id`);
+CREATE INDEX `idx_receipts_ph` ON `receipts` (`pharmacy_id`);
+CREATE INDEX `idx_receipts_cust` ON `receipts` (`customer_id`);
+CREATE INDEX `idx_filescans_v` ON `file_scans` (`verdict`);
+CREATE INDEX `idx_payouts_ph` ON `payouts` (`pharmacy_id`);
+CREATE INDEX `idx_driver_ph` ON `driver_pharmacies` (`pharmacy_id`);
+CREATE INDEX `idx_offers_delivery` ON `delivery_offers` (`delivery_id`, `status`);
+CREATE INDEX `idx_subs_run` ON `subscriptions` (`status`, `next_run`);
+CREATE INDEX `idx_subinv_cust` ON `subscription_invoices` (`customer_id`);
+CREATE INDEX `idx_payment_otps_user` ON `payment_otps` (`user_id`, `order_id`, `method_code`);
+CREATE INDEX `idx_fm_nodes_parent` ON `fm_nodes` (`parent_id`);
+CREATE INDEX `idx_fm_nodes_owner` ON `fm_nodes` (`owner_user_id`);
 
 -- Tables en ajout seul / suppression interdite des pièces validées
 CREATE TRIGGER `audit_logs_no_update` BEFORE UPDATE ON `audit_logs` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_logs est en ajout seul';

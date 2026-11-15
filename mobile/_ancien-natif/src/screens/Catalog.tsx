@@ -10,7 +10,7 @@ export default function Catalog() {
   useEffect(() => { const h = setTimeout(async () => { setLoading(true); try { setRows(await get(`/portal/catalog?q=${encodeURIComponent(q)}`)); } catch (e) { err(e); } finally { setLoading(false); } }, 300); return () => clearTimeout(h); }, [q]);
   const n = Object.values(cart).reduce((a, b) => a + b, 0);
   async function reserve() {
-    try { const r = await post('/portal/orders', { lines: Object.entries(cart).map(([product_id, qty]) => ({ product_id: Number(product_id), qty })) }); setCart({}); Alert.alert('Réservation', `${r.number} - à retirer avant ${r.expires_at ?? 'expiration'}`); } catch (e) { err(e); }
+    try { const r = await post('/portal/orders', { lines: Object.entries(cart).map(([product_id, qty]) => ({ product_id: Number(product_id), qty })) }); setCart({}); Alert.alert('Réservation', `${r.number} — à retirer avant ${r.expires_at ?? 'expiration'}`); } catch (e) { err(e); }
   }
   return (
     <View style={s.screen}>

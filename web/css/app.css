@@ -285,3 +285,36 @@ body{-webkit-overflow-scrolling:touch;overscroll-behavior-y:auto}
 .svgmap { position: relative; }
 .map-actions { position: absolute; top: 8px; right: 8px; left: 8px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; z-index: 2; }
 .map-actions .btn { background: var(--panel); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.gmap{position:relative;width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--bg2)}
+.gm-label{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;white-space:nowrap}
+.picker input[type=number]{min-width:0;flex:1}
+.offer{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;background:var(--bg2);border:1px solid var(--line);flex:none;display:grid;place-items:center;font-weight:700}
+.msg img{max-width:100%;border-radius:8px}
+.osm{position:relative;overflow:hidden;background:#e9eef0;cursor:grab;user-select:none;-webkit-user-select:none}
+.osm:active{cursor:grabbing}
+.osm-tiles,.osm-markers{position:absolute;inset:0}
+.osm-tiles img{position:absolute;left:0;top:0;width:256px;height:256px;max-width:none;user-select:none;pointer-events:none}
+.osm-lines{position:absolute;left:0;top:0;pointer-events:none}
+.osm-markers{pointer-events:none}
+.osm-marker{position:absolute;left:0;top:0;width:0;height:0}
+.osm-dot{position:absolute;left:-9px;top:-9px;width:18px;height:18px;border-radius:50% 50% 50% 0;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);transform:rotate(-45deg) translate(0,-7px)}
+.osm-dot.round{border-radius:50%;transform:none}
+.osm-label{position:absolute;left:12px;top:-30px;white-space:nowrap;font:700 12px/1.2 system-ui,sans-serif;color:#111;background:rgba(255,255,255,.92);padding:2px 6px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.osm-ctl{position:absolute;left:8px;top:8px;display:flex;flex-direction:column;gap:4px;z-index:3}
+.osm-z{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:#fff;color:#111;font:700 20px/1 system-ui;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.osm-attr{position:absolute;right:0;bottom:0;z-index:3;background:rgba(255,255,255,.8);font:11px system-ui;padding:1px 6px;color:#333;text-decoration:none}
+.osm-sugg{position:relative}.osm-sugg ul{position:absolute;left:0;right:0;top:100%;z-index:20;margin:2px 0 0;padding:0;list-style:none;background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;max-height:220px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,.2)}.osm-sugg li{padding:8px 10px;cursor:pointer;font-size:.9em}.osm-sugg li:hover,.osm-sugg li:focus{background:var(--bg2)}
+
+.history{opacity:.55;filter:grayscale(.85)}.history:hover{opacity:.85}
+.sr-search{max-width:360px;margin:8px 0}
+.sr-export{width:auto;max-width:150px}
+body.hide-history .history{display:none}
+
+/* Compteurs de notifications sur les entrées du menu + mise en évidence de l'élément ciblé */
+.nbadge{margin-inline-start:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--bad,#d92d20);color:#fff;font-size:.72rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.tabbar a .nbadge,.sheet a .nbadge{position:absolute;top:2px;inset-inline-end:calc(50% - 26px);margin:0}
+.sheet a{position:relative}
+body.nav-collapsed .nav a .nbadge{position:absolute;top:2px;inset-inline-end:2px;min-width:16px;height:16px;font-size:.62rem}
+tr.flash,.flash{animation:gpflash 1.2s ease 2}
+@keyframes gpflash{0%,100%{background:transparent}50%{background:var(--brand-soft,#d1fae5)}}

@@ -24,7 +24,7 @@ export default async function (box, { embedded = false, onChosen } = {}) {
   const choose = (p) => { choosePharmacy(p); toast(`Pharmacie choisie : ${p.name}`); if (onChosen) onChosen(p); else location.hash = '#/portal'; };
   const geo = h('button', { class: 'btn primary', type: 'button', onclick: async (e) => { const b = e.currentTarget; b.disabled = true; status.textContent = 'Recherche de votre position…'; try { here = await locate(); status.textContent = ''; await loadPh(); if (q.value.trim().length >= 2) await search(); } catch (er) { status.textContent = ''; fail(er); } finally { b.disabled = false; } } }, icon('pin', { size: 16 }), 'Pharmacies près de moi');
   async function loadPh() {
-    const qs = here ? `?lat=${here.lat}&lng=${here.lng}` : ''; const l = await get('/public/pharmacies' + qs);
+    const qs = here ? `?lat=${here.lat}&lng=${here.lng}` : ''; const l = await get('/portal/pharmacies' + qs);
     status.textContent = here ? 'Triées de la plus proche à la plus éloignée, d\'après votre position.' : 'Activez « Pharmacies près de moi » pour les trier par distance.';
     clear(list).append(...(l.length ? l.map((p) => pharmacyCard(p, choose, chosenPharmacy()?.id)) : [h('div', { class: 'empty' }, 'Aucune pharmacie pour le moment')]));
   }

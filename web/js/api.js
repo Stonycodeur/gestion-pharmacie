@@ -1,4 +1,4 @@
-import { cachePut, cacheGet, setOnline, setSender, setScope, net } from './offline.js';
+import { cachePut, cacheGet, setOnline, setSender, setScope, net, enqueue } from './offline.js';
 // Client API : jeton d'accès en mémoire (jamais en localStorage), refresh par cookie HttpOnly.
 export const state = { token: null, user: null, perms: new Set(), pharmacy: null, phOverride: null };
 let refreshing = null;
@@ -59,3 +59,9 @@ export async function listen(onEvent, signal) {
 
 // Envoi d'un élément de la file d'attente (vente hors ligne) : clé d'idempotence → aucun doublon possible
 setSender(async (it) => { const r = await raw(it.method || 'POST', it.path, it.body); const d = await r.json().catch(() => null); if (!r.ok) throw new ApiError(r.status, d); return d; });
+
+// Action à mettre en file d'attente si le réseau est coupé (chauffeur : accepter, produit récupéré, message, fin de course…). Rejouée automatiquement au retour du réseau.
+export async function postQueued(path, body = {}, label = '', method = 'POST') {
+  try { return await api(method, path, body); }
+  catch (e) { if (e.status !== 0) throw e; await enqueue({ key: 'q' + Date.now() + Math.random().toString(36).slice(2, 7), method, path, body, label: label || path }); return { queued: true }; }
+}

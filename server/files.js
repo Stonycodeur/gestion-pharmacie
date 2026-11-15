@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { bad, str } from './util.js';
 import { get, run } from './db.js';
+import { scanUpload } from './scanner.js';
 export const UPLOAD_DIR = resolve(process.cwd(), process.env.UPLOAD_DIR || './data/uploads');
 export const PUBLIC_DIR = resolve(UPLOAD_DIR, 'public');
 const MAGIC = { 'image/jpeg': [0xff, 0xd8, 0xff], 'image/png': [0x89, 0x50, 0x4e, 0x47], 'application/pdf': [0x25, 0x50, 0x44, 0x46], 'image/webp': null };
@@ -18,7 +19,10 @@ export function decodeUpload(f, { mimes = DOCS, max = 3 * 1024 * 1024 } = {}) {
   if (!buf.length || buf.length > max) throw bad('FILE_SIZE', `Fichier vide ou > ${Math.round(max / 1048576)} Mo`);
   const ok = mime === 'image/webp' ? buf.subarray(0, 4).toString() === 'RIFF' && buf.subarray(8, 12).toString() === 'WEBP' : MAGIC[mime].every((b, i) => buf[i] === b);
   if (!ok) throw bad('FILE_TYPE', 'Le contenu du fichier ne correspond pas à son type');
-  return { buf, mime, ext: EXT[mime], name: str(f.name, 'nom du fichier', { max: 120 }) || 'fichier.' + EXT[mime] };
+  const name = str(f.name, 'nom du fichier', { max: 120 }) || 'fichier.' + EXT[mime];
+  const av = scanUpload(buf, mime, name); // antivirus intégré : tout fichier reçu est analysé avant stockage
+  if (av.infected) throw bad('MALWARE', `Fichier refusé par l'antivirus : ${av.reason}`);
+  return { buf, mime, ext: EXT[mime], name };
 }
 // Stockage en base (table stored_files) : survit aux redémarrages/redéploiements, sans disque. Lecture de repli sur l'ancien dossier si le fichier y existe encore.
 export function storeBlob(buf, mime, ext, isPublic) {

@@ -37,7 +37,7 @@ router.post('/accounting/entries', { perm: 'accounting.manage' }, (ctx) => tx(()
 router.post('/accounting/entries/:id/reverse', { perm: 'accounting.manage' }, (ctx) => tx(() => { // pas de suppression : contre-passation traçable
   const e = get('SELECT * FROM acc_entries WHERE id=? AND pharmacy_id=?', ctx.params.id, ctx.ph); if (!e) throw notFound('Écriture'); if (e.reversed_of) throw conflict('BAD_STATE', 'Une extourne ne s\'extourne pas'); if (get('SELECT 1 FROM acc_entries WHERE reversed_of=?', e.id)) throw conflict('ALREADY', 'Déjà extournée');
   const date = todaySql(); const lk = lockedUntil(ctx.ph); if (lk && date <= lk) throw conflict('PERIOD_LOCKED', `Période verrouillée jusqu'au ${lk}`);
-  const number = nextNumber(ctx.ph, 'acc_entry', 'EC'); const id = insert('INSERT INTO acc_entries(pharmacy_id,number,entry_date,label,reference,reversed_of,user_id) VALUES (?,?,?,?,?,?,?)', ctx.ph, number, date, `Extourne de ${e.number} - ${e.label}`.slice(0, 150), e.reference, e.id, ctx.user.id);
+  const number = nextNumber(ctx.ph, 'acc_entry', 'EC'); const id = insert('INSERT INTO acc_entries(pharmacy_id,number,entry_date,label,reference,reversed_of,user_id) VALUES (?,?,?,?,?,?,?)', ctx.ph, number, date, `Extourne de ${e.number} — ${e.label}`.slice(0, 150), e.reference, e.id, ctx.user.id);
   for (const l of all('SELECT * FROM acc_entry_lines WHERE entry_id=?', e.id)) insert('INSERT INTO acc_entry_lines(entry_id,account_code,debit,credit,memo) VALUES (?,?,?,?,?)', id, l.account_code, l.credit, l.debit, l.memo);
   audit(ctx, 'accounting.reverse', 'acc_entry', e.id, undefined, { number }); return { id, number };
 }));

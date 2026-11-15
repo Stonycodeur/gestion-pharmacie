@@ -1,6 +1,6 @@
 // Génère database/mariadb/Gestion_pharmacie.sql (MariaDB 10.6+, InnoDB, utf8mb4) à partir de server/schema.sql.
 // Usage : npm run gen:mariadb
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,7 +14,7 @@ for (const a of [...src.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (.+);$/gm)]) {
 }
 src = src.replace(/^UPDATE .*;$/gm, '');
 
-const LONG = /^(notes|address|legal_notice|old_json|new_json|body|reason|status_reason|difference_reason|posology|delivery_address|storage_conditions)$/;
+const LONG = /^(notes|address|legal_notice|old_json|new_json|body|reason|status_reason|difference_reason|posology|delivery_address|storage_conditions|config|fields|detail|risk_flags|instructions|countries|currencies|checkout_url|service|merchant_account)$/;
 const DATE_ONLY = /^(exp_date|mfg_date|birth_date|prescription_date|valid_until|expected_date)$/;
 const DATETIME = /(_at|_until)$/;
 const q = (s) => '`' + s + '`';
@@ -46,7 +46,7 @@ while ((m = tableRe.exec(src))) {
 const idx = [...src.matchAll(/CREATE INDEX (\w+) ON (\w+)\((.*?)\);/g)].map((x) => `CREATE INDEX ${q(x[1])} ON ${q(x[2])} (${x[3].split(',').map((c) => q(c.trim())).join(', ')});`);
 const trig = ['audit_logs', 'stock_movements'].flatMap((t) => ['UPDATE', 'DELETE'].map((op) => `CREATE TRIGGER ${q(t + '_no_' + op.toLowerCase())} BEFORE ${op} ON ${q(t)} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${t} est en ajout seul';`))
   .concat(['sales', 'sale_lines'].map((t) => `CREATE TRIGGER ${q(t + '_no_delete')} BEFORE DELETE ON ${q(t)} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'une vente validée ne peut pas être supprimée (utiliser un remboursement)';`));
-const sql = `-- Gestion_pharmacie - schéma MariaDB 10.6+ (InnoDB, utf8mb4). GÉNÉRÉ par tools/gen-mariadb.js - ne pas modifier à la main.
+const sql = `-- Gestion_pharmacie — schéma MariaDB 10.6+ (InnoDB, utf8mb4). GÉNÉRÉ par tools/gen-mariadb.js — ne pas modifier à la main.
 -- ⚠ Non exécuté sur un serveur MariaDB dans l'environnement de développement initial : valider sur une instance de test (voir docs/MISE_EN_LIGNE.md).
 -- Montants : BIGINT en plus petite unité monétaire (ex. millimes pour TND).
 SET FOREIGN_KEY_CHECKS = 0;
@@ -77,6 +77,7 @@ for (const f of readdirSync(resolve(root, 'server/migrations')).filter((x) => x.
   parts.push(...pf, ...[...t.matchAll(/CREATE INDEX (\w+) ON (\w+)\((.*?)\);/g)].map((x) => `CREATE INDEX ${q(x[1])} ON ${q(x[2])} (${x[3].split(',').map((c) => q(c.trim())).join(', ')});`));
   parts.push(...[...t.matchAll(/^(UPDATE [^;]*;)$/gm)].map((x) => x[1]));
   const ins = t.match(/^INSERT INTO[\s\S]*?;\s*$/m); if (ins) parts.push(ins[0].trim());
+  const xf = resolve(root, 'database/mariadb/migrations-extra', f); if (existsSync(xf)) parts.push(readFileSync(xf, 'utf8').replace(/^--.*$/gm, '').trim()); // correctifs écrits à la main pour les bases déjà installées
   writeFileSync(resolve(root, 'database/mariadb/migrations', f), '-- GÉNÉRÉ par tools/gen-mariadb.js\n' + parts.join('\n\n') + '\n'); nmig++;
 }
 console.log(`${nmig} scripts d'évolution MariaDB générés`);

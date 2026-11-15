@@ -24,6 +24,9 @@ export function seedCountries() {
     for (const part of chunk(rows, 250)) run(`INSERT OR IGNORE INTO cities(country_id,name) VALUES ${part.map(() => '(?,?)').join(',')}`, ...part.flat());
   }
   run("UPDATE pharmacies SET country_id=(SELECT id FROM countries WHERE iso2='TN') WHERE country_id IS NULL");
+  // Devises usuelles de chaque pays (la première est la devise principale) ; modifiables ensuite par le super-administrateur.
+  if (get('SELECT 1 FROM countries WHERE currencies IS NULL LIMIT 1')) { const cur = json('currencies.json'); for (const c of all('SELECT id,iso2 FROM countries WHERE currencies IS NULL')) if (cur[c.iso2]) run('UPDATE countries SET currencies=? WHERE id=?', cur[c.iso2].join(','), c.id); }
+  run("UPDATE pharmacies SET currencies=currency WHERE currencies IS NULL");
 }
 export const dialOfPharmacy = (ph) => get('SELECT c.dial_code d FROM pharmacies p JOIN countries c ON c.id=p.country_id WHERE p.id=?', ph)?.d || '216';
 export function normalizePhone(raw, defaultDial, label = 'téléphone') {

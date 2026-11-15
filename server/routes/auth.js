@@ -4,6 +4,7 @@ import { get, all, run, insert, tx } from '../db.js';
 import { HttpError, bad, str, email as vEmail, addDays, nowSql } from '../util.js';
 import { hashPassword, verifyPassword, passwordPolicy, signJwt, randomToken, sha256, rateLimit, newTotpSecret, verifyTotp } from '../security.js';
 import { userPerms } from '../rbac.js';
+import { ensurePharmacyMethods } from '../paymodes.js';
 import { sendMail, mailEnabled } from '../mailer.js';
 
 const publicUser = (u) => ({ avatar_url: u.avatar_path ? `/api/v1/public/file/${u.avatar_path}` : null, is_primary: !!u.is_primary, is_guest: !!u.is_guest, phone: u.phone ?? null, id: u.id, email: u.email, name: u.name, role: u.role_code ?? u.role, pharmacy_id: u.pharmacy_id, lang: u.lang, mfa_enabled: !!u.mfa_enabled, must_change_password: !!u.must_change_password });
@@ -57,7 +58,8 @@ router.post('/auth/login', { public: true, ok200: true }, (ctx) => {
 router.post('/auth/guest', { public: true, ok200: true }, (ctx) => {
   const rl = rateLimit(`guest:${ctx.ip}`, 20, 60 * 60000); if (!rl.ok) throw new HttpError(429, 'RATE_LIMITED', 'Trop de sessions invité, réessayez plus tard', { retryAfter: rl.retryAfter });
   const tag = randomToken(6);
-  const id = insert("INSERT INTO users(email,password_hash,name,role_code,pharmacy_id,must_change_password,is_guest) VALUES (?,?,?,?,NULL,0,1)", `guest-${tag}@guest.invalid`, hashPassword(randomToken(24) + 'aA1'), 'Invité', 'guest');
+  const gc = Number(ctx.body?.country_id) ? get('SELECT id FROM countries WHERE id=? AND active=1', Number(ctx.body.country_id))?.id ?? null : null;
+  const id = insert("INSERT INTO users(email,password_hash,name,role_code,pharmacy_id,must_change_password,is_guest,country_id) VALUES (?,?,?,?,NULL,0,1,?)", `guest-${tag}@guest.invalid`, hashPassword(randomToken(24) + 'aA1'), 'Invité', 'guest', gc);
   const u = get('SELECT * FROM users WHERE id=?', id); const { out, cookie } = issue(u, ctx); ctx.res.setHeader('Set-Cookie', cookie); audit({ ...ctx, ph: null }, 'auth.guest', 'user', id); return out;
 });
 router.post('/auth/refresh', { public: true, ok200: true }, (ctx) => {
@@ -133,11 +135,14 @@ router.post('/auth/register', { public: true }, (ctx) => {
   const name = str(b.name, 'nom', { required: true, max: 120 }), em = vEmail(b.email, 'e-mail', { required: true });
   const pol = passwordPolicy(b.password); if (pol) throw bad('WEAK_PASSWORD', pol);
   const rl = rateLimit('register:' + ctx.ip, 5, 3600e3); if (!rl.ok) throw new HttpError(429, 'RATE_LIMITED', 'Trop d\'inscriptions');
-  const ph = Number(b.pharmacy_id) || get("SELECT id FROM pharmacies WHERE status='active' ORDER BY id LIMIT 1")?.id;
-  if (!ph || !get("SELECT 1 FROM pharmacies WHERE id=? AND status='active'", ph)) throw bad('VALIDATION', 'Pharmacie invalide');
+  // Le pays est obligatoire : l'inscription n'est possible que s'il existe au moins une pharmacie active dans ce pays.
+  const country = Number(b.country_id) ? get('SELECT * FROM countries WHERE id=? AND active=1', Number(b.country_id)) : null; if (!country) throw bad('VALIDATION', 'Choisissez votre pays');
+  const inCountry = all("SELECT id FROM pharmacies WHERE status='active' AND public_listed=1 AND country_id=? ORDER BY id", country.id);
+  if (!inCountry.length) throw bad('NO_PHARMACY_IN_COUNTRY', `Aucune pharmacie n'est encore disponible en ${country.name_fr} : l'inscription est impossible pour le moment`);
+  const ph = Number(b.pharmacy_id) || inCountry[0].id; if (!inCountry.some((x) => x.id === ph)) throw bad('VALIDATION', 'Cette pharmacie n\'est pas dans votre pays');
   if (get('SELECT 1 FROM users WHERE email=?', em)) throw new HttpError(409, 'DUPLICATE', 'Un compte existe déjà avec cet e-mail');
   return tx(() => {
-    const uid = insert("INSERT INTO users(email,password_hash,name,role_code,pharmacy_id,phone) VALUES (?,?,?,'customer',?,?)", em, hashPassword(b.password), name, ph, str(b.phone, 'téléphone', { max: 40 }));
+    const uid = insert("INSERT INTO users(email,password_hash,name,role_code,pharmacy_id,phone,country_id) VALUES (?,?,?,'customer',?,?,?)", em, hashPassword(b.password), name, ph, str(b.phone, 'téléphone', { max: 40 }), country.id);
     insert('INSERT INTO customers(pharmacy_id,user_id,name,phone,email,marketing_consent,consent_at) VALUES (?,?,?,?,?,?,?)', ph, uid, name, str(b.phone, 'téléphone', { max: 40 }), em, b.marketing_consent ? 1 : 0, b.marketing_consent ? nowSql() : null);
     audit({ ...ctx, email: em, ph }, 'auth.register', 'user', uid);
     return { id: uid };
@@ -156,7 +161,7 @@ router.post('/auth/setup', { public: true }, (ctx) => {
   return tx(() => {
     if (get('SELECT COUNT(*) n FROM users').n > 0) throw new HttpError(409, 'ALREADY_SETUP', 'Le système est déjà configuré');
     const phId = insert('INSERT INTO pharmacies(name,address,phone,currency,currency_decimals,timezone) VALUES (?,?,?,?,?,?)', ph.name, ph.address, ph.phone, ph.currency, ph.dec, ph.tz);
-    insert('INSERT INTO cash_registers(pharmacy_id,name) VALUES (?,?)', phId, 'Caisse 1');
+    insert('INSERT INTO cash_registers(pharmacy_id,name) VALUES (?,?)', phId, 'Caisse 1'); ensurePharmacyMethods(phId);
     const uid = insert("INSERT INTO users(email,password_hash,name,role_code,pharmacy_id) VALUES (?,?,?,'super_admin',NULL)", em, hashPassword(a.password), name);
     audit({ ...ctx, email: em, ph: phId }, 'system.setup', 'pharmacy', phId, undefined, { pharmacy: ph.name, admin: em });
     return { ok: true, user_id: uid, pharmacy_id: phId };

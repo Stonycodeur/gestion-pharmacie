@@ -1,3 +1,4 @@
+import { remindScheduled } from './delivery_config.js';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -6,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { get, all } from './db.js';
 import { seedRbac } from './rbac.js';
 import { bootNetwork, purgeTrash } from './boot.js';
-import { handleApi, securityHeaders, config } from './http.js';
-import './routes/auth.js'; import './routes/catalog.js'; import './routes/stock.js'; import './routes/sales.js'; import './routes/clients.js'; import './routes/admin.js'; import './routes/reports.js'; import './routes/features.js'; import './routes/accounts.js'; import './routes/payments.js'; import './routes/delivery.js'; import './routes/me.js'; import './routes/rfq.js'; import './routes/accounting.js'; import './routes/forecast.js'; import './routes/countries.js'; import './routes/network.js'; import './routes/discover.js'; import './routes/help.js'; import './routes/drivers.js'; import './routes/appointments.js';
+import { handleApi, securityHeaders, config, notify } from './http.js';
+import './routes/i18n.js'; import './routes/filemanager.js'; import './routes/auth.js'; import './routes/catalog.js'; import './routes/stock.js'; import './routes/sales.js'; import './routes/clients.js'; import './routes/admin.js'; import './routes/reports.js'; import './routes/features.js'; import './routes/accounts.js'; import './routes/payments.js'; import './routes/payments2.js'; import './routes/delivery.js'; import './routes/me.js'; import './routes/rfq.js'; import './routes/accounting.js'; import './routes/forecast.js'; import './routes/countries.js'; import './routes/network.js'; import './routes/discover.js'; import './routes/help.js'; import './routes/drivers.js'; import './routes/dispatch.js'; import { runSubscriptions } from './routes/finance2.js'; import './routes/appointments.js';
 import { expireOrders } from './routes/clients.js';
 import { refreshAll } from './alerts.js';
 
@@ -74,6 +75,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   createApp().listen(port, () => {
     console.log(`Gestion_pharmacie ${config.prod ? '[PRODUCTION]' : '[DEV]'} → http://localhost:${port}   (API: /api/v1, doc: /api-docs)`);
   });
-  setInterval(() => { try { expireOrders(); refreshAll(); purgeTrash(); } catch (e) { console.error('[job]', e); } }, 10 * 60 * 1000).unref();
+  setInterval(() => { try { expireOrders(); refreshAll(); purgeTrash(); runSubscriptions(); } catch (e) { console.error('[job]', e); } }, 10 * 60 * 1000).unref();
+  setInterval(() => { try { remindScheduled(notify); } catch (e) { console.error('[rappel]', e); } }, 60 * 1000).unref();
   try { expireOrders(); refreshAll(); } catch (e) { console.error('[job]', e); }
 }

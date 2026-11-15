@@ -39,9 +39,9 @@ export function need(ctx, perm) { if (!can(ctx.user, perm)) throw forbidden(`Per
 
 // Journal d'audit (ajout seul). `view` = consultation de donnée sensible.
 export function audit(ctx, action, entity, entityId, oldV, newV) {
-  insert('INSERT INTO audit_logs(pharmacy_id,user_id,user_email,action,entity,entity_id,old_json,new_json,ip) VALUES (?,?,?,?,?,?,?,?,?)',
+  insert('INSERT INTO audit_logs(pharmacy_id,user_id,user_email,action,entity,entity_id,old_json,new_json,ip,user_agent) VALUES (?,?,?,?,?,?,?,?,?,?)',
     ctx.ph ?? ctx.user?.pharmacy_id ?? null, ctx.user?.id ?? null, ctx.user ? (ctx.user.email + (ctx.user.impersonatorEmail ? ` (par ${ctx.user.impersonatorEmail})` : '')) : (ctx.email ?? null), action, entity ?? null,
-    entityId == null ? null : String(entityId), oldV === undefined ? null : JSON.stringify(oldV), newV === undefined ? null : JSON.stringify(newV), ctx.ip ?? null);
+    entityId == null ? null : String(entityId), oldV === undefined ? null : JSON.stringify(oldV), newV === undefined ? null : JSON.stringify(newV), ctx.ip ?? null, ctx.ua ?? null);
 }
 
 // ---------- SSE (temps réel) ----------
@@ -62,11 +62,16 @@ function deliverExternal(userId, title, body, link) {
     if (n.sms !== false && smsEnabled() && u.phone) sendSms({ to: u.phone, text }).catch((e) => console.error('[sms]', e.message));
   } catch (e) { console.error('[notify]', e.message); }
 }
+const TILE_HOSTS = (() => { const h = ['https://tile.openstreetmap.org', 'https://*.tile.openstreetmap.org']; try { if (process.env.OSM_TILE_URL) h.push(new URL(process.env.OSM_TILE_URL.replace(/\{[a-z]\}/g, 'a')).origin.replace('//a.', '//*.')); } catch { /* URL de tuiles invalide : ignorée */ } return h.join(' '); })();
+export let smsHook = null; export const setSmsHook = (f) => { smsHook = f; };
+// Page ouverte par défaut quand l'appelant n'indique pas de lien : chaque alerte métier renvoie vers sa page ; sinon on lit simplement le message.
+const KIND_LINK = { stock_out: '#/stock', stock_critical: '#/stock', stock_low: '#/stock', expiring: '#/stock', expired: '#/stock', cold_chain: '#/stock', transfer_incoming: '#/stock', transfer_gap: '#/stock' };
 export function notify({ pharmacyId, userId = null, audience = null, kind, title, body = null, dedupe = null, link = null }) {
+  link ||= KIND_LINK[kind] || (String(kind).startsWith('batch_') ? '#/stock' : null);
   if (dedupe && get('SELECT 1 FROM notifications WHERE dedupe_key=?', dedupe)) return null;
   const id = insert('INSERT INTO notifications(pharmacy_id,user_id,audience,kind,title,body,dedupe_key,link) VALUES (?,?,?,?,?,?,?,?)', pharmacyId, userId, audience, kind, title, body, dedupe, link);
   publish(pharmacyId, 'notification', { id, kind, title, body, audience, link }, userId);
-  if (userId) deliverExternal(userId, title, body, link);
+  if (userId) { deliverExternal(userId, title, body, link); try { smsHook?.({ pharmacyId, userId, kind, title }); } catch { /* SMS best-effort */ } }
   return id;
 }
 setInterval(() => { for (const c of clients) try { c.res.write(': ping\n\n'); } catch { clients.delete(c); } }, 25000).unref();
@@ -87,12 +92,14 @@ export function securityHeaders(res) {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(self)');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  res.setHeader('Content-Security-Policy', `default-src 'self'; img-src 'self' data: blob: ${TILE_HOSTS} https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.ggpht.com; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' https://maps.googleapis.com; connect-src 'self' https://*.googleapis.com https://*.google.com https://*.gstatic.com; frame-src 'self' blob: https://*.google.com; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
   if (config.prod) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 }
 
 // X-Forwarded-For n'est pris en compte que derrière un proxy de confiance (TRUSTED_PROXY=true) et on lit le DERNIER saut (ajouté par le proxy), jamais une valeur fournie par le client.
-export const clientIp = (req) => { const xf = process.env.TRUSTED_PROXY === 'true' && req.headers['x-forwarded-for']; return (xf ? String(xf).split(',').pop().trim() : req.socket.remoteAddress) || ''; };
+// Vraie adresse du visiteur : derrière un proxy (Render, Nginx, Cloudflare) on lit l'en-tête transmis, sinon l'adresse de la connexion.
+const behindProxy = () => process.env.TRUSTED_PROXY === 'true' || (process.env.TRUSTED_PROXY !== 'false' && (!!process.env.RENDER || !!process.env.RENDER_EXTERNAL_URL));
+export const clientIp = (req) => { let ip = ''; if (behindProxy()) { const cf = req.headers['cf-connecting-ip']; const xf = req.headers['x-forwarded-for']; ip = String(cf || (xf ? String(xf).split(',')[0] : '') || req.headers['x-real-ip'] || '').trim(); } return (ip || req.socket.remoteAddress || '').replace(/^::ffff:/, ''); };
 
 export async function handleApi(req, res, url) {
   const origin = req.headers.origin;
@@ -123,12 +130,12 @@ export async function handleApi(req, res, url) {
       route = r; r.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1]))); break;
     }
     if (!route) throw pathMatched ? new HttpError(405, 'METHOD_NOT_ALLOWED', 'Méthode non autorisée') : new HttpError(404, 'NOT_FOUND', 'Route inconnue');
-    const ctx = { req, res, ip, params, query: Object.fromEntries(url.searchParams), body: {}, user: null, ph: null, send };
+    const ctx = { req, res, ip, ua: String(req.headers['user-agent'] || '').slice(0, 300), params, query: Object.fromEntries(url.searchParams), body: {}, user: null, ph: null, send };
     if (!route.opts.public) {
       const h = req.headers.authorization || '';
       const claims = h.startsWith('Bearer ') ? verifyJwt(h.slice(7), config.secret) : null;
       if (!claims || claims.typ !== 'access') throw new HttpError(401, 'UNAUTHENTICATED', 'Authentification requise');
-      const u = get('SELECT id,email,name,role_code,pharmacy_id,status,suspended_until,lang,mfa_enabled,must_change_password FROM users WHERE id=?', claims.sub); reviveExpired(u);
+      const u = get('SELECT id,email,name,role_code,pharmacy_id,status,suspended_until,lang,mfa_enabled,must_change_password,country_id,see_all_countries FROM users WHERE id=?', claims.sub); reviveExpired(u);
       if (!u || u.status !== 'active') throw new HttpError(401, 'UNAUTHENTICATED', 'Compte inactif');
       ctx.user = { ...u, role: u.role_code, mfaPending: !!claims.mfa_pending };
       if (claims.imp) { // session de prise de contrôle (super-administrateur) : tracée, courte, et sans action sur les comptes/mots de passe

@@ -5,7 +5,7 @@ import { router, audit, notify, publish } from '../http.js';
 import { get, all, run } from '../db.js';
 import { bad, notFound, forbidden, conflict, str } from '../util.js';
 import { fileUrl } from './network.js';
-import { isGuest, OWN } from '../portal.js';
+import { isGuest, OWN, countryScope } from '../portal.js';
 
 export const haversineKm = (a, b, c, d) => {
   const R = 6371, r = (x) => (x * Math.PI) / 180, dl = r(c - a), dg = r(d - b);
@@ -30,15 +30,28 @@ router.get('/public/pharmacies', { public: true, needsPharmacy: false }, (ctx) =
   return rows.filter((r) => !max || (r.distance_km !== null && r.distance_km <= max)).sort(sortByDist);
 });
 
+// Liste des pharmacies pour un client connecté : limitée à son pays (sauf autorisation « toutes les pharmacies »).
+router.get('/portal/pharmacies', { anyPerm: ['portal.use', 'portal.guest', 'portal.browse'], needsPharmacy: false }, (ctx) => {
+  const me = here(ctx.query), cs = countryScope(ctx), w = [], p = [];
+  if (cs) { w.push('p.country_id=?'); p.push(cs); } else if (ctx.query.country) { w.push('c.iso2=?'); p.push(String(ctx.query.country).toUpperCase().slice(0, 2)); }
+  if (ctx.query.q) { w.push('(p.name LIKE ? OR p.city LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`); }
+  return all(BASE + (w.length ? ' AND ' + w.join(' AND ') : '') + ' LIMIT 500', ...p).map((x) => phView(x, me)).sort(sortByDist);
+});
+
 const AVAIL = "COALESCE((SELECT SUM(s.qty_available - s.qty_reserved) FROM stock_levels s JOIN batches b ON b.id=s.batch_id WHERE s.pharmacy_id=ph.id AND b.product_id=pr.id AND b.status='ok' AND b.exp_date >= date('now')),0)";
 // Recherche d'un médicament : uniquement les pharmacies qui l'ont réellement disponible (quantité jamais exposée, seulement le booléen).
 router.get('/portal/search', { anyPerm: ['portal.use', 'portal.guest', 'portal.browse'], needsPharmacy: false }, (ctx) => {
   const q = String(ctx.query.q || '').trim(); if (q.length < 2) throw bad('VALIDATION', 'Saisissez au moins 2 caractères');
   const me = here(ctx.query);
-  const rows = all(`SELECT pr.id product_id, pr.name, pr.dci, pr.dosage, pr.form, pr.sale_price, pr.rx_status, ph.id pharmacy_id
+  // Recherche tolérante : chaque mot saisi doit se retrouver (sans accents ni majuscules) dans le nom, la DCI, le dosage, la forme, le code ou le code-barres.
+  // Ainsi « Amoxicilline 500 mg gélules B/12 » est trouvé même si le nom, le dosage et la forme sont enregistrés dans des champs séparés.
+  const fold = (x) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const tokens = fold(q).split(/[\s,;]+/).filter(Boolean);
+  const rows = all(`SELECT pr.id product_id, pr.name, pr.dci, pr.dosage, pr.form, pr.sale_price, pr.rx_status, pr.sku, pr.barcode, ph.id pharmacy_id
     FROM products pr JOIN pharmacy_catalog pc ON pc.product_id=pr.id JOIN pharmacies ph ON ph.id=pc.pharmacy_id
-    WHERE pr.status='active' AND ph.status='active' AND ph.public_listed=1 AND (pr.name LIKE ? OR pr.dci LIKE ?) AND ${AVAIL} > 0 ORDER BY pr.name LIMIT 600`, `%${q}%`, `%${q}%`);
-  const phs = new Map(all(BASE).map((x) => [x.id, phView(x, me)])); const byProd = new Map();
+    WHERE pr.status='active' AND ph.status='active' AND ph.public_listed=1 AND ${AVAIL} > 0 ORDER BY pr.name LIMIT 20000`)
+    .filter((r) => { const hay = fold([r.name, r.dci, r.dosage, r.form, r.sku, r.barcode].join(' ')); return tokens.every((t) => hay.includes(t)); });
+  const cs = countryScope(ctx); const phs = new Map(all(BASE + (cs ? ' AND p.country_id=' + Number(cs) : '')).map((x) => [x.id, phView(x, me)])); const byProd = new Map();
   for (const r of rows) {
     const e = byProd.get(r.product_id) || { product_id: r.product_id, name: r.name, dci: r.dci, dosage: r.dosage, form: r.form, rx_status: r.rx_status, pharmacies: [] };
     const ph = phs.get(r.pharmacy_id); if (ph) e.pharmacies.push({ ...ph, sale_price: r.sale_price, available: true }); byProd.set(r.product_id, e);
@@ -53,7 +66,7 @@ router.put('/portal/orders/:id/message', { anyPerm: ['portal.use', 'portal.guest
   const notes = str(ctx.body.notes, 'message', { max: 500 }) || null;
   run('UPDATE customer_orders SET notes=? WHERE id=?', notes, o.id);
   audit({ ...ctx, ph: o.pharmacy_id }, 'order.message', 'order', o.id, { notes: o.notes }, { notes });
-  notify({ pharmacyId: o.pharmacy_id, audience: 'staff', kind: 'order', title: `Message client — ${o.number}`, body: notes || '(message supprimé)', link: '#/orders' });
+  notify({ pharmacyId: o.pharmacy_id, audience: 'staff', kind: 'order', title: `Message client — ${o.number}`, body: notes || '(message supprimé)', link: `#/orders?id=${o.id}` });
   publish(o.pharmacy_id, 'order', { id: o.id }, null); return { ok: true, notes };
 });
 router.get('/portal/orders/:id/history', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => {

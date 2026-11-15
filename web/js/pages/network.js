@@ -15,23 +15,30 @@ export default async function (box) {
 async function drawPharmacies(body) {
   const [list, countries] = await Promise.all([get('/pharmacies'), getCountries(true)]);
   const cOpts = countries.filter((c) => c.active).map((c) => ({ value: c.id, label: `${c.name} (+${c.dial_code})`, dial: c.dial_code }));
+  const ratesCodes = (await get('/currency-rates').catch(() => [])).map((r) => r.code);
+  const curList = (cid) => { const c = countries.find((x) => x.id === Number(cid)); return c?.currencies?.length ? c.currencies : ratesCodes; };
+  const curOpts = (cid) => curList(cid).map((x) => ({ value: x, label: x }));
   const PF = (p = {}, creating = false) => [
     { name: 'name', label: 'Nom', required: true, value: p.name }, { name: 'country_id', label: 'Pays (détermine l\'indicatif téléphonique)', type: 'select', required: true, options: cOpts, value: p.country_id ?? p.country?.id, syncDial: 'phone', dialInitial: !!p.phone },
     { name: 'city', label: 'Ville', value: p.city, hint: 'Choisissez dans la liste du pays ou saisissez une autre ville', suggest: { field: 'country_id', load: getCities } }, { name: 'address', label: 'Adresse', value: p.address }, { name: 'phone', label: 'Téléphone', type: 'phone', value: p.phone, dial: countries.find((c) => c.id === (p.country_id))?.dial_code },
     { name: 'email', label: 'E-mail', type: 'email', value: p.email }, { name: 'lat', label: 'Latitude (GPS)', type: 'number', step: 'any', value: p.lat, hint: 'Utilisée pour « pharmacies les plus proches » et le calcul des livraisons' }, { name: 'lng', label: 'Longitude (GPS)', type: 'number', step: 'any', value: p.lng },
-    { name: 'opening_hours', label: 'Horaires d\'ouverture', value: p.opening_hours, placeholder: 'Lun–Sam 8h–20h' }, { name: 'currency', label: 'Devise', value: p.currency || 'TND' }, { name: 'currency_decimals', label: 'Décimales', type: 'number', value: p.currency_decimals ?? 3 },
+    { name: 'opening_hours', label: 'Horaires d\'ouverture', value: p.opening_hours, placeholder: 'Lun–Sam 8h–20h' }, { name: 'currency', label: 'Devise principale', type: 'select', required: true, options: curOpts(p.country_id ?? p.country?.id), value: p.currency || '' }, { name: 'currencies', label: 'Devises acceptées (parmi celles du pays — Ctrl/⌘ pour plusieurs)', type: 'multiselect', options: curOpts(p.country_id ?? p.country?.id), value: String(p.currencies || p.currency || '').split(',') }, { name: 'currency_decimals', label: 'Décimales', type: 'number', value: p.currency_decimals ?? 3 },
     { name: 'public_listed', label: 'Visible par les clients', type: 'checkbox', value: p.public_listed ?? 1 }, { name: 'appointments_enabled', label: 'Prise de rendez-vous médecin activée', type: 'checkbox', value: p.appointments_enabled },
     ...(creating ? [{ name: 'copy_catalog_from', label: 'Copier tous les médicaments de…', type: 'select', options: list.map((x) => ({ value: x.id, label: x.name })), hint: 'Laissez vide pour créer les produits un par un' }] : []),
   ];
-  const clean = (v) => ({ ...v, country_id: Number(v.country_id), public_listed: !!v.public_listed, appointments_enabled: !!v.appointments_enabled });
+  const clean = (v) => ({ ...v, country_id: Number(v.country_id), currencies: (v.currencies || []).length ? v.currencies : [v.currency], public_listed: !!v.public_listed, appointments_enabled: !!v.appointments_enabled });
   const geoBtn = (m) => { const b = h('button', { type: 'button', class: 'btn sm', onclick: async () => { try { const p = await locate(); const f = m.box.querySelector('form'); const set = (n, v) => { const i = [...f.querySelectorAll('label.f')].find((l) => l.textContent.startsWith(n))?.querySelector('input'); if (i) i.value = v.toFixed(6); }; set('Latitude', p.lat); set('Longitude', p.lng); toast('Position de cet appareil utilisée'); } catch (e) { fail(e); } } }, icon('pin', { size: 14 }), 'Utiliser ma position actuelle'); return b; };
-  const open = (title, fields, submit, creating) => { const m = formModal(title, fields, submit, { wide: true, extra: null }); const f = m.box?.querySelector?.('form'); if (f) f.insertBefore(h('div', { class: 'row', style: { marginBottom: '8px' } }, geoBtn(m)), f.children[8] || null); return m; };
+  // Quand le pays change, les devises proposées sont celles de ce pays (un pays peut en avoir plusieurs).
+  const wireCurrencies = (f) => { if (!f) return; const sels = [...f.querySelectorAll('select')], ctry = sels[0], main = sels.find((x) => !x.multiple && x !== ctry && [...x.options].some((o) => o.value === 'TND' || /^[A-Z]{3}$/.test(o.value))), multi = f.querySelector('select[multiple]'); if (!ctry || !main || !multi) return;
+    const fill = (keep) => { const opts = curList(ctry.value), prevMain = main.value, prevMulti = new Set([...multi.selectedOptions].map((o) => o.value)); main.replaceChildren(...opts.map((c) => h('option', { value: c, selected: c === prevMain }, c))); multi.replaceChildren(...opts.map((c) => h('option', { value: c, selected: keep ? prevMulti.has(c) : c === main.value }, c))); if (![...multi.selectedOptions].length && multi.options[0]) multi.options[0].selected = true; };
+    ctry.addEventListener('change', () => fill(false)); };
+  const open = (title, fields, submit, creating) => { const m = formModal(title, fields, submit, { wide: true, extra: null }); const f = m.box?.querySelector?.('form'); wireCurrencies(f); if (f) f.insertBefore(h('div', { class: 'row', style: { marginBottom: '8px' } }, geoBtn(m)), f.children[8] || null); return m; };
   const wrap = h('div', { class: 'card' });
   clear(wrap).append(h('div', { class: 'row between' }, h('h2', {}, 'Établissements'), h('button', { class: 'btn sm primary', onclick: () => open('Nouvel établissement', PF({}, true), async (v) => { await post('/pharmacies', clean(v)); toast('Établissement créé'); clear(body); drawPharmacies(body); }, true) }, icon('plus', { size: 14 }), 'Nouveau')),
     table([
       { label: '', render: (p) => p.logo_url ? h('img', { src: p.logo_url, alt: '', width: 36, height: 36, style: { borderRadius: '8px', objectFit: 'cover' } }) : h('span', { class: 'avatar-lg', style: { width: '36px', height: '36px', fontSize: '1rem' } }, p.name[0]) },
       { label: 'Nom', render: (p) => h('div', {}, h('strong', {}, p.name), h('div', { class: 'muted' }, [p.city, p.address].filter(Boolean).join(' · '))) },
-      { label: 'Pays', render: (p) => { const c = countries.find((x) => x.id === p.country_id); return c ? h('span', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } }, flagImg(c), `${c.name} (+${c.dial_code})`) : '-'; } },
+      { label: 'Pays', render: (p) => { const c = countries.find((x) => x.id === p.country_id); return c ? h('span', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } }, flagImg(c), `${c.name} (+${c.dial_code})`) : '—'; } },
       { label: 'Gestionnaire', render: (p) => p.manager ? h('span', {}, p.manager.name) : h('span', { class: 'muted' }, 'Non affecté') },
       { label: 'Statut', render: (p) => h('span', {}, badge(p.status === 'active' ? 'Actif' : 'Désactivé', p.status === 'active' ? 'ok' : 'bad'), ' ', p.appointments_enabled ? badge('RDV', 'info') : null) },
       { label: '', render: (p) => h('span', { class: 'row' },
@@ -48,7 +55,7 @@ async function drawPharmacies(body) {
 function logoModal(p, done) {
   const inp = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp' }); const prev = h('div', {}, p.logo_url ? h('img', { src: p.logo_url, alt: 'Logo', height: 64, style: { borderRadius: '10px' } }) : h('p', { class: 'muted' }, 'Aucun logo'));
   inp.addEventListener('change', async () => { const f = inp.files[0]; if (!f) return; clear(prev).append(h('img', { src: URL.createObjectURL(f), alt: 'Aperçu', height: 64, style: { borderRadius: '10px' } })); });
-  const m = modal(`Logo - ${p.name}`, h('div', {}, h('p', { class: 'muted' }, 'Affiché sur les e-mails (bienvenue, demandes de prix) et dans l\'application. PNG, JPEG ou WebP, 1 Mo max.'), prev, inp,
+  const m = modal(`Logo — ${p.name}`, h('div', {}, h('p', { class: 'muted' }, 'Affiché sur les e-mails (bienvenue, demandes de prix) et dans l\'application. PNG, JPEG ou WebP, 1 Mo max.'), prev, inp,
     h('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '12px' } }, p.logo_url ? h('button', { class: 'btn danger', onclick: async () => { try { await del(`/pharmacies/${p.id}/logo`); m.close(); done(); } catch (e) { fail(e); } } }, 'Retirer') : null,
       h('button', { class: 'btn primary', onclick: async () => { const f = inp.files[0]; if (!f) return toast('Choisissez une image', true); try { await post(`/pharmacies/${p.id}/logo`, { file: { mime: f.type, name: f.name, data_base64: await fileToB64(f) } }); toast('Logo enregistré'); m.close(); done(); } catch (e) { fail(e); } } }, 'Enregistrer'))));
 }
@@ -57,12 +64,12 @@ async function managerModal(p, done) {
   const users = (await get(`/users?pharmacy_id=${p.id}&kind=staff&limit=200`).catch(() => ({ data: [] }))).data || [];
   const roles = (await get('/roles').catch(() => [])).filter((r) => !['super_admin', 'customer', 'guest'].includes(r.code));
   const mode = h('select', {}, h('option', { value: 'new' }, 'Créer un nouveau compte'), users.length ? h('option', { value: 'existing' }, 'Choisir un membre du personnel') : null);
-  const exist = h('select', { hidden: true }, users.map((u) => h('option', { value: u.id }, `${u.name} - ${u.email}`)));
+  const exist = h('select', { hidden: true }, users.map((u) => h('option', { value: u.id }, `${u.name} — ${u.email}`)));
   const name = h('input', { placeholder: 'Nom complet' }), email = h('input', { type: 'email', placeholder: 'E-mail' });
   const role = h('select', {}, roles.map((r) => h('option', { value: r.code, selected: r.code === 'pharmacy_admin' }, r.label || r.code)));
   const nf = h('div', { class: 'grid g2' }, h('label', { class: 'f' }, 'Nom', name), h('label', { class: 'f' }, 'E-mail', email));
   mode.addEventListener('change', () => { exist.hidden = mode.value !== 'existing'; nf.hidden = mode.value !== 'new'; });
-  const m = modal(`Gestionnaire - ${p.name}`, h('div', {}, h('p', { class: 'muted' }, 'Le gestionnaire administre les utilisateurs de cet établissement uniquement, avec les droits de son rôle (ajustables ensuite dans Utilisateurs → Droits).'), h('label', { class: 'f' }, 'Compte', mode), exist, nf, h('label', { class: 'f' }, 'Rôle / droits', role),
+  const m = modal(`Gestionnaire — ${p.name}`, h('div', {}, h('p', { class: 'muted' }, 'Le gestionnaire administre les utilisateurs de cet établissement uniquement, avec les droits de son rôle (ajustables ensuite dans Utilisateurs → Droits).'), h('label', { class: 'f' }, 'Compte', mode), exist, nf, h('label', { class: 'f' }, 'Rôle / droits', role),
     h('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '12px' } }, h('button', { class: 'btn primary', onclick: async () => {
       try { const b = mode.value === 'existing' ? { user_id: Number(exist.value), role_code: role.value } : { name: name.value, email: email.value, role_code: role.value }; const r = await post(`/pharmacies/${p.id}/manager`, b); m.close(); done();
         if (r.temporary_password) modal('Compte créé', h('div', {}, h('p', {}, 'Mot de passe provisoire (envoyé aussi par e-mail si l\'envoi est configuré) :'), h('code', { style: { fontSize: '1.2rem', userSelect: 'all' } }, r.temporary_password), h('p', { class: 'muted' }, 'À changer dès la première connexion.'))); else toast('Gestionnaire affecté'); } catch (e) { fail(e); } } }, 'Affecter'))));
@@ -74,20 +81,20 @@ async function catalogModal(p, list) {
     clear(rows).append(...(r.data.length ? r.data.map((x) => h('div', { class: 'list-item' }, h('span', {}, `${x.name} ${x.dosage || ''}`), x.in_catalog ? h('button', { class: 'btn sm danger', onclick: async () => { try { await del(`/pharmacies/${p.id}/catalog/${x.id}`); load(); } catch (e) { fail(e); } } }, 'Retirer') : h('button', { class: 'btn sm', onclick: async () => { await post(`/pharmacies/${p.id}/catalog`, { product_ids: [x.id] }); load(); } }, 'Ajouter'))) : [h('div', { class: 'empty' }, 'Aucun résultat')])); };
   q.addEventListener('input', debounce(load, 250));
   const src = h('select', {}, h('option', { value: '' }, 'Copier tous les médicaments de…'), list.filter((x) => x.id !== p.id).map((x) => h('option', { value: x.id }, x.name)));
-  modal(`Médicaments - ${p.name}`, h('div', {}, stat, h('div', { class: 'row' }, src, h('button', { class: 'btn', onclick: async () => { if (!src.value) return; try { await post(`/pharmacies/${p.id}/catalog`, { copy_from: Number(src.value) }); toast('Médicaments copiés'); load(); } catch (e) { fail(e); } } }, 'Copier')), h('p', { class: 'muted' }, 'Pour créer un produit spécifique à cette pharmacie : Produits → Nouveau, puis choisissez les pharmacies concernées.'), q, rows), { wide: true }); await load();
+  modal(`Médicaments — ${p.name}`, h('div', {}, stat, h('div', { class: 'row' }, src, h('button', { class: 'btn', onclick: async () => { if (!src.value) return; try { await post(`/pharmacies/${p.id}/catalog`, { copy_from: Number(src.value) }); toast('Médicaments copiés'); load(); } catch (e) { fail(e); } } }, 'Copier')), h('p', { class: 'muted' }, 'Pour créer un produit spécifique à cette pharmacie : Produits → Nouveau, puis choisissez les pharmacies concernées.'), q, rows), { wide: true }); await load();
 }
 
 async function drawCountries(body) {
   const rows = await getCountries(true).then(() => get('/countries?all=1'));
   const CF = (c) => { c ||= {}; return [{ name: 'iso2', label: 'Code ISO (2 lettres)', required: true, value: c.iso2, maxLength: 2 }, { name: 'name_fr', label: 'Nom (français)', required: true, value: c.name_fr }, { name: 'name_en', label: 'Nom (anglais)', value: c.name_en }, { name: 'name_ar', label: 'Nom (arabe)', value: c.name_ar },
-    { name: 'dial_code', label: 'Indicatif (sans +)', required: true, value: c.dial_code, maxLength: 4 }, { name: 'phone_min', label: 'Chiffres min. du numéro local', type: 'number', value: c.phone_min ?? 8 }, { name: 'phone_max', label: 'Chiffres max.', type: 'number', value: c.phone_max ?? 9 }, { name: 'active', label: 'Actif', type: 'checkbox', value: c.active ?? 1 }]; };
+    { name: 'dial_code', label: 'Indicatif (sans +)', required: true, value: c.dial_code, maxLength: 4 }, { name: 'currencies', label: 'Devises utilisées dans ce pays (codes séparés par des virgules, la première est la principale)', value: (c.currencies || []).join(', '), placeholder: 'XAF, USD' }, { name: 'phone_min', label: 'Chiffres min. du numéro local', type: 'number', value: c.phone_min ?? 8 }, { name: 'phone_max', label: 'Chiffres max.', type: 'number', value: c.phone_max ?? 9 }, { name: 'active', label: 'Actif', type: 'checkbox', value: c.active ?? 1 }]; };
   const refresh = async () => { await getCountries(true); clear(body); drawCountries(body); };
   const edit = (c) => {
     let file = null, reset = false; const prev = h('span', {}, c ? flagImg(c, 40) : '');
     const inp = h('input', { type: 'file', accept: 'image/svg+xml,image/png,image/jpeg,image/webp' });
     inp.addEventListener('change', async () => { file = inp.files[0] || null; reset = false; if (file) { prev.replaceChildren(h('img', { class: 'flag', alt: '', src: await fileToUri(file), style: { width: '40px', height: '30px', objectFit: 'contain' } })); } });
     const extra = h('div', { class: 'f' }, h('label', {}, 'Drapeau (SVG, PNG, JPEG ou WebP, 40 Ko max)', inp), h('div', { class: 'row' }, prev, c?.custom_flag ? h('button', { type: 'button', class: 'btn sm', onclick: () => { reset = true; file = null; inp.value = ''; prev.replaceChildren(h('small', {}, 'Drapeau par défaut rétabli à l\'enregistrement')); } }, 'Rétablir le drapeau par défaut') : h('small', { class: 'muted' }, 'Un drapeau est fourni par défaut ; téléversez une image seulement pour le remplacer.')));
-    formModal(c ? `Modifier - ${c.name_fr}` : 'Nouveau pays', CF(c), async (v) => {
+    formModal(c ? `Modifier — ${c.name_fr}` : 'Nouveau pays', CF(c), async (v) => {
       const b = { ...v, active: !!v.active }; if (file) b.flag = await fileToUri(file); else if (reset) b.flag = null;
       if (c) { delete b.iso2; await put('/countries/' + c.id, b); } else await post('/countries', b);
       toast('Pays enregistré'); await refresh();
@@ -100,7 +107,7 @@ async function drawCountries(body) {
     const stat = h('p', { class: 'muted' });
     const load = async () => { data = await get(`/countries/${c.id}/cities`); draw(); };
     q.addEventListener('input', draw);
-    modal(`Villes - ${c.name_fr}`, h('div', {}, stat, q, list, h('form', { class: 'row', style: { marginTop: '10px' }, onsubmit: async (e) => { e.preventDefault(); const name = add.value.trim(); if (!name) return; try { await post(`/countries/${c.id}/cities`, { name }); add.value = ''; await load(); } catch (er) { fail(er); } } }, add, h('button', { class: 'btn primary', type: 'submit' }, icon('plus', { size: 14 }), 'Ajouter'))));
+    modal(`Villes — ${c.name_fr}`, h('div', {}, stat, q, list, h('form', { class: 'row', style: { marginTop: '10px' }, onsubmit: async (e) => { e.preventDefault(); const name = add.value.trim(); if (!name) return; try { await post(`/countries/${c.id}/cities`, { name }); add.value = ''; await load(); } catch (er) { fail(er); } } }, add, h('button', { class: 'btn primary', type: 'submit' }, icon('plus', { size: 14 }), 'Ajouter'))));
     await load();
   };
   const q = h('input', { type: 'search', placeholder: 'Rechercher un pays, un code ou un indicatif…', 'aria-label': 'Rechercher un pays' }), wrap = h('div');

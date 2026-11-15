@@ -29,7 +29,7 @@ const mkOpts = (brand: string, bottom: number) => ({ headerStyle: { backgroundCo
 });
 // Couleur de l'établissement (publique) mise en cache pour le démarrage hors connexion
 async function loadBrand(): Promise<string> { try { const b = await (await fetch(BASE + '/api/v1/branding')).json(); if (b?.color) { await AsyncStorage.setItem('gp_brand', b.color); return b.color; } } catch {} return (await AsyncStorage.getItem('gp_brand')) || C.brand; }
-function OfflineBanner() { const [o, setO] = useState(online); const ins = useSafeAreaInsets(); useEffect(() => onNet(setO), []); if (o) return null; return <View style={{ backgroundColor: '#fdf0d5', paddingTop: ins.top + 6, paddingBottom: 6, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}><Icon name="wifioff" size={16} color="#92580a" /><Text style={{ color: '#92580a', fontWeight: '600', flex: 1 }}>Hors connexion - données en cache</Text></View>; }
+function OfflineBanner() { const [o, setO] = useState(online); const ins = useSafeAreaInsets(); useEffect(() => onNet(setO), []); if (o) return null; return <View style={{ backgroundColor: '#fdf0d5', paddingTop: ins.top + 6, paddingBottom: 6, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}><Icon name="wifioff" size={16} color="#92580a" /><Text style={{ color: '#92580a', fontWeight: '600', flex: 1 }}>Hors connexion — données en cache</Text></View>; }
 
 export default function App() { return <SafeAreaProvider><Root /></SafeAreaProvider>; }
 function Root() {

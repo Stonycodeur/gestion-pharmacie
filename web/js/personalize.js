@@ -4,10 +4,10 @@ import { h, clear, modal, toast, fail, icon, money, confirmDialog } from './ui.j
 import { t } from './i18n.js';
 import { getPrefs, setPrefs, resetPrefs, SWATCHES, brandColor, DEFAULTS } from './theme.js';
 import { net, onNet, listOutbox, sync, retryConflict, removeOutbox, cacheInfo, wipeAll } from './offline.js';
-import { lang, setLang } from './i18n.js';
+import { lang, setLang, languages, loadPack } from './i18n.js';
 
 const seg = (opts, cur, onPick) => { const box = h('div', { class: 'seg', role: 'group' }); const draw = (c) => { clear(box); opts.forEach(([v, label, ic]) => box.append(h('button', { type: 'button', 'aria-pressed': String(v) === String(c), onclick: () => { onPick(v); draw(v); } }, ic ? icon(ic, { size: 16 }) : null, label))); }; draw(cur); return box; };
-const row = (ic, label, ctl) => h('div', { class: 'setrow' }, h('label', {}, icon(ic, { size: 18 }), label), h('div', {}, ctl));
+const row = (ic, label, ctl, extra) => h('div', { class: 'setrow' }, h('label', {}, icon(ic, { size: 18 }), label), h('div', {}, ctl, extra));
 
 export function personalize({ onLang } = {}) {
   const p = getPrefs();
@@ -22,8 +22,8 @@ export function personalize({ onLang } = {}) {
   const vol = h('input', { type: 'range', min: 0, max: 100, value: Math.round(sp.volume * 100), 'aria-label': 'Volume', oninput: (e) => setSoundPrefs({ volume: Number(e.target.value) / 100 }), onchange: () => notifyBeep() });
   // Sonnerie depuis l'appareil : le fichier choisi devient la sonnerie de notification de ce compte (et de cet établissement) sur cet appareil
   const ringInfo = h('small', { class: 'muted' }, customRing() ? 'Sonnerie : ' + customRing().name : 'Aucune sonnerie personnelle');
-  const ringPicker = () => { const inp = h('input', { type: 'file', accept: 'audio/*', hidden: true, onchange: async () => { const f = inp.files[0]; inp.value = ''; if (!f) return; try { const n = await setCustomRing(f); toast('Sonnerie enregistrée : ' + n); playSound('custom', soundPrefs().volume); ringInfo.textContent = 'Sonnerie : ' + n; if (![...sSel.options].some((o) => o.value === 'custom')) sSel.insertBefore(h('option', { value: 'custom' }), sSel.lastChild); [...sSel.options].find((o) => o.value === 'custom').textContent = 'Ma sonnerie : ' + n; sSel.value = 'custom'; } catch (e) { fail(e); } } });
-    return h('div', { class: 'row', style: { marginTop: '6px' } }, inp, h('button', { class: 'btn sm', type: 'button', onclick: () => inp.click() }, 'Choisir un son sur mon appareil'), customRing() ? h('button', { class: 'btn sm', type: 'button', onclick: () => { clearCustomRing(); ringInfo.textContent = 'Aucune sonnerie personnelle'; [...sSel.options].find((o) => o.value === 'custom')?.remove(); sSel.value = soundPrefs().sound; toast('Sonnerie personnelle supprimée'); } }, 'Retirer') : null, ringInfo); };
+  const ringPicker = () => { const inp = h('input', { type: 'file', accept: 'audio/*,video/mpeg,video/mp4,video/webm,.mp3,.mpeg,.mpg,.mpga,.wav,.ogg,.oga,.opus,.m4a,.aac,.flac,.amr,.3gp,.weba', hidden: true, onchange: async () => { const f = inp.files[0]; inp.value = ''; if (!f) return; try { const n = await setCustomRing(f); toast('Sonnerie enregistrée : ' + n); playSound('custom', soundPrefs().volume); ringInfo.textContent = 'Sonnerie : ' + n; if (![...sSel.options].some((o) => o.value === 'custom')) sSel.insertBefore(h('option', { value: 'custom' }), sSel.lastChild); [...sSel.options].find((o) => o.value === 'custom').textContent = 'Ma sonnerie : ' + n; sSel.value = 'custom'; } catch (e) { fail(e); } } });
+    return h('div', { class: 'row', style: { marginTop: '6px' } }, inp, h('button', { class: 'btn sm', type: 'button', onclick: () => inp.click() }, 'Choisir un son sur mon appareil (7 Mo max.)'), customRing() ? h('button', { class: 'btn sm', type: 'button', onclick: () => { clearCustomRing(); ringInfo.textContent = 'Aucune sonnerie personnelle'; [...sSel.options].find((o) => o.value === 'custom')?.remove(); sSel.value = soundPrefs().sound; toast('Sonnerie personnelle supprimée'); } }, 'Retirer') : null, ringInfo); };
   const body = h('div', {},
     h('div', { class: 'preview' }, h('button', { class: 'btn primary' }, icon('check', { size: 16 }), t('Aperçu')), h('button', { class: 'btn' }, t('Secondaire')), h('span', { class: 'badge b-ok' }, 'OK'), h('span', { class: 'badge b-warn' }, t('Alerte'))),
     row('palette', t('Mode'), seg([['auto', t('Auto'), 'sparkle'], ['light', t('Clair'), 'sun'], ['dark', t('Sombre'), 'moon']], p.mode, (v) => setPrefs({ mode: v }))),
@@ -35,7 +35,7 @@ export function personalize({ onLang } = {}) {
     row('sun', t('Contraste'), seg([['normal', t('Normal')], ['high', t('Élevé')]], p.contrast, (v) => setPrefs({ contrast: v }))),
     row('refresh', t('Animations'), seg([['on', t('Activées')], ['off', t('Réduites')]], p.motion, (v) => setPrefs({ motion: v }))),
     row('bell', 'Sonnerie des notifications', h('div', { class: 'row', style: { flexWrap: 'nowrap' } }, sSel, vol, h('button', { class: 'btn sm', type: 'button', onclick: () => notifyBeep() }, 'Écouter')), ringPicker()),
-    row('globe', t('Langue'), seg([['fr', 'Français'], ['en', 'English'], ['ar', 'العربية']], lang, (v) => { setLang(v); m.close(); onLang?.(); })));
+    row('globe', t('Langue'), h('select', { 'aria-label': t('Langue'), onchange: async (e) => { setLang(e.target.value); await loadPack(e.target.value); m.close(); onLang?.(); } }, languages().map(([v, l]) => h('option', { value: v, selected: v === lang }, l)))));
   const m = modal(t('Personnaliser'), body, { actions: [h('button', { class: 'btn', onclick: () => { resetPrefs(); m.close(); toast(t('Préférences réinitialisées')); } }, icon('rotate', { size: 16 }), t('Réinitialiser')), h('button', { class: 'btn primary', onclick: () => m.close() }, t('Terminé'))] });
 }
 

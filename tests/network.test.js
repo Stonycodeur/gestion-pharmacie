@@ -133,7 +133,7 @@ test('centre d\'aide : réclamation client, réponse signée au nom de la pharma
   const fid = det.body.messages[0].attachments[0].id;
   const img = await fetch(base + `/files/${fid}/content`, { headers: { authorization: 'Bearer ' + ph } }); assert.equal(img.status, 200); assert.equal(img.headers.get('content-type'), 'image/png');
   const r1 = await call('POST', `/help/tickets/${t.body.id}/messages`, { body: 'Nous vous remboursons', reply_as: 'pharmacy' }, ph); assert.equal(r1.status, 201); assert.ok(r1.body.signature.length > 2);
-  const r2 = await call('POST', `/help/tickets/${t.body.id}/messages`, { body: 'Cordialement', reply_as: 'user' }, ph); assert.ok(r2.body.signature.includes(' - '));
+  const r2 = await call('POST', `/help/tickets/${t.body.id}/messages`, { body: 'Cordialement', reply_as: 'user' }, ph); assert.ok(r2.body.signature.includes(' — '));
   const mine = await call('GET', '/help/tickets/' + t.body.id, null, ct); assert.equal(mine.body.status, 'answered'); assert.equal(mine.body.messages.length, 3);
   const notifs = await call('GET', '/portal/notifications', null, ct); assert.ok(notifs.body.some((n) => n.link && n.link.includes('ticket=' + t.body.id)));
   assert.equal((await call('POST', `/files/${fid}/decision`, { decision: 'accepted' }, ct)).status, 403); // l'expéditeur ne décide pas
@@ -153,7 +153,7 @@ test('centre d\'aide : réclamation client, réponse signée au nom de la pharma
 
 test('inter-pharmacies : recherche d\'un produit chez les autres et contact direct', async () => {
   const sa = await login('superadmin'); const ph = await login('pharmacien');
-  const p2 = (await call('POST', '/pharmacies', { name: 'Pharmacie Partenaire', city: 'Sfax', copy_catalog_from: 1 }, sa)); assert.equal(p2.status, 201, JSON.stringify(p2.body));
+  const p2 = (await call('POST', '/pharmacies', { name: 'Pharmacie Partenaire', city: 'Sfax', currency: 'TND', copy_catalog_from: 1 }, sa)); assert.equal(p2.status, 201, JSON.stringify(p2.body));
   const none = await call('GET', '/inter/search?q=zzzz', null, ph); assert.deepEqual(none.body, []);
   const s = await call('GET', '/inter/search?q=para', null, ph); assert.equal(s.status, 200); for (const r of s.body) assert.notEqual(r.pharmacy_id, 1);
   const tk = await call('POST', '/help/tickets', { pharmacy_id: p2.body.id, subject: 'Avez-vous du paracétamol ?', body: 'Besoin de 10 boîtes' }, ph); assert.equal(tk.status, 201, JSON.stringify(tk.body));
@@ -177,12 +177,13 @@ test('chauffeurs : inscription, disponibilité, devis, acceptation, suivi GPS en
   const ct = (await call('POST', '/auth/login', { email: 'cl4@demo.local', password: PW + 'f' })).body.access_token;
   const cat = await call('GET', '/portal/catalog?q=a', null, ct, { 'x-pharmacy-id': '1' }); const av = cat.body.find((p) => p.available && p.rx_status === 'free');
   const o = (await call('POST', '/portal/orders', { lines: [{ product_id: av.id, qty: 1 }] }, ct, { 'x-pharmacy-id': '1' })).body;
-  let q = await call('GET', `/portal/orders/${o.id}/delivery-quote?lat=36.85&lng=10.25`, null, ct); assert.equal(q.status, 200); assert.equal(q.body.drivers.length, 0); // hors ligne
-  assert.equal((await call('PUT', '/driver/me', { availability: 'available', per_km: 600 }, dt)).status, 200);
+  for (const st of ['confirmed', 'preparing']) assert.equal((await call('POST', `/orders/${o.id}/status`, { status: st }, adm)).status, 200);
+  let q = await call('GET', `/portal/orders/${o.id}/delivery-quote?lat=36.85&lng=10.25`, null, ct); assert.equal(q.body.eligible, false, 'aucun chauffeur : bouton masqué'); assert.equal(q.body.modes.length, 4); assert.equal(q.status, 200); assert.equal(q.body.drivers.length, 0); // hors ligne
+  assert.equal((await call('PUT', '/driver/me', { availability: 'available' }, dt)).status, 200);
   q = await call('GET', `/portal/orders/${o.id}/delivery-quote?lat=36.85&lng=10.25`, null, ct); assert.equal(q.body.drivers.length, 1);
-  const quote = q.body.drivers[0].quote; assert.ok(quote.fee > 2000 && quote.distance_m > 5000 && quote.eta_max > quote.eta_min, JSON.stringify(quote));
-  const dl = await call('POST', `/portal/orders/${o.id}/delivery`, { address: '12 rue des Oliviers, Tunis', lat: 36.85, lng: 10.25, driver_id: q.body.drivers[0].id }, ct); assert.equal(dl.status, 201, JSON.stringify(dl.body));
-  assert.equal(dl.body.fee, quote.fee); assert.equal(dl.body.driver_response, 'pending');
+  assert.equal(q.body.eligible, true); const std = q.body.modes.find((m) => m.mode === 'standard'), eco = q.body.modes.find((m) => m.mode === 'economy'), exp = q.body.modes.find((m) => m.mode === 'express'); assert.ok(eco.price < std.price && std.price < exp.price && q.body.distance_m > 5000 && std.eta_max > std.eta_min, JSON.stringify(q.body.modes));
+  const dl = await call('POST', `/portal/orders/${o.id}/delivery`, { address: '12 rue des Oliviers, Tunis', phone: '98 222 333', lat: 36.85, lng: 10.25, driver_id: q.body.drivers[0].id }, ct); assert.equal(dl.status, 201, JSON.stringify(dl.body));
+  assert.equal(dl.body.fee, std.price); assert.equal(dl.body.mode, 'standard'); assert.equal(dl.body.driver_response, 'pending');
   // suivi interdit avant le départ
   assert.equal((await call('GET', `/portal/deliveries/${dl.body.id}/track`, null, ct)).body.tracking, false);
   // la pharmacie ne peut pas lancer avant l'acceptation
@@ -214,9 +215,12 @@ test('chauffeurs : inscription, disponibilité, devis, acceptation, suivi GPS en
   assert.equal((await call('POST', `/portal/deliveries/${dl.body.id}/report`, { reason: 'Retard important' }, ct)).status, 201);
   assert.equal((await call('POST', `/driver/deliveries/${dl.body.id}/report`, { reason: 'Client injoignable' }, dt)).status, 201);
   assert.equal((await call('GET', '/delivery-reports', null, adm)).body.length, 2);
+  assert.equal((await call('GET', '/driver/me', null, dt)).body.rating, null); // note en attente de validation
+  const rl = (await call('GET', '/delivery-ratings', null, adm)).body; assert.ok(rl.length >= 1 && rl.every((x) => x.status === 'pending'));
+  assert.equal((await call('PUT', '/delivery-ratings/' + rl.find((x) => x.target === 'driver').id, { status: 'approved' }, adm)).status, 200);
   assert.equal((await call('GET', '/driver/me', null, dt)).body.rating, 4);
   // annulation par le chauffeur avant départ
-  const o2 = (await call('POST', '/portal/orders', { lines: [{ product_id: av.id, qty: 1 }] }, ct, { 'x-pharmacy-id': '1' })).body;
+  const o2 = (await call('POST', '/portal/orders', { lines: [{ product_id: av.id, qty: 1 }] }, ct, { 'x-pharmacy-id': '1' })).body; for (const st of ['confirmed', 'preparing']) await call('POST', `/orders/${o2.id}/status`, { status: st }, adm);
   const d2 = (await call('POST', `/portal/orders/${o2.id}/delivery`, { address: '3 avenue Habib, Tunis', lat: 36.82, lng: 10.19, driver_id: dv.body.id }, ct)).body;
   assert.equal((await call('POST', `/driver/deliveries/${d2.id}/cancel`, { reason: 'Panne' }, dt)).status, 200);
   assert.equal((await call('GET', '/deliveries/' + d2.id, null, adm)).body.driver, null);
@@ -248,7 +252,7 @@ test('demande de prix : coordonnées complètes, aperçu, envoi HTML avec logo, 
 
 test('établissement : logo, gestionnaire affecté, catalogue par pharmacie (copie / sélection), gestionnaire limité à sa pharmacie', async () => {
   const sa = await login('superadmin');
-  const ph = (await call('POST', '/pharmacies', { name: 'Pharmacie Nord', city: 'Bizerte' }, sa)).body.id;
+  const ph = (await call('POST', '/pharmacies', { name: 'Pharmacie Nord', city: 'Bizerte', currency: 'TND' }, sa)).body.id;
   assert.equal((await call('POST', `/pharmacies/${ph}/logo`, { file: { mime: 'image/png', data_base64: PNG } }, sa)).status, 200);
   const m = await call('POST', `/pharmacies/${ph}/manager`, { email: 'gest.nord@demo.local', name: 'Gestionnaire Nord', overrides: { 'users.delete': 'deny' } }, sa); assert.equal(m.status, 201, JSON.stringify(m.body));
   const mt = (await call('POST', '/auth/login', { email: 'gest.nord@demo.local', password: m.body.temporary_password })).body; assert.ok(mt.access_token);

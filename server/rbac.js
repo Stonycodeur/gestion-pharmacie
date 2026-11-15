@@ -22,7 +22,7 @@ export const PERMISSIONS = {
   'temperature.manage': 'Relevés de température', 'portal.use': 'Espace client', 'portal.browse': 'Parcourir les pharmacies et chercher un médicament', 'portal.guest': 'Mode invité (sans historique)', 'users.delete': 'Supprimer des comptes', 'help.view': 'Centre d\'aide : voir les demandes', 'help.reply': 'Centre d\'aide : répondre', 'files.view': 'Centre de fichiers', 'inter.search': 'Chercher dans les autres pharmacies et les contacter', 'driver.use': 'Espace chauffeur', 'doctor.use': 'Espace médecin (créneaux)', 'trash.manage': 'Corbeille : restaurer / supprimer définitivement',
   'transfers.manage': 'Créer/expédier des transferts', 'transfers.receive': 'Réceptionner des transferts', 'supplier_returns.manage': 'Retours et avoirs fournisseur', 'supplier_payments.manage': 'Paiements fournisseurs',
   'sales.credit': 'Vente à crédit / reste à payer', 'sales.deposit': 'Acomptes sur commandes', 'accounting.lock': 'Clôturer / verrouiller une période',
-  'deliveries.view': 'Voir les livraisons', 'deliveries.manage': 'Gérer les livraisons et chauffeurs', 'rfq.manage': 'Demandes de prix fournisseurs', 'accounting.manage': 'Saisir des écritures comptables', 'forecast.view': 'Prévisions et analyses de stock',
+  'deliveries.view': 'Voir les livraisons', 'deliveries.manage': 'Gérer les livraisons (lancer, affecter)', 'drivers.admin': 'Créer et modifier les chauffeurs (comptes, tarifs, affectations)', 'finance.admin': 'Abonnements, KYC, clés API, webhooks et SMS (paramétrage financier)', 'rfq.manage': 'Demandes de prix fournisseurs', 'accounting.manage': 'Saisir des écritures comptables', 'forecast.view': 'Prévisions et analyses de stock',
 };
 const P = Object.keys(PERMISSIONS);
 const SPECIAL = ['portal.use', 'portal.browse', 'portal.guest', 'driver.use', 'doctor.use'];
@@ -90,10 +90,10 @@ export const roleHas = (role, perm) => cache.get(role)?.has(perm) ?? false;
 export const permsOf = (role) => [...(cache.get(role) ?? [])];
 // Permissions individuelles : « refusé » l'emporte, « accordé » s'ajoute au rôle ; le super-administrateur a toujours tout.
 const ov = (id) => { let o = ucache.get(id); if (!o) { o = { grant: new Set(), deny: new Set() }; for (const r of all('SELECT permission_code p, effect e FROM user_permissions WHERE user_id=?', id)) (r.e === 'grant' ? o.grant : o.deny).add(r.p); ucache.set(id, o); } return o; };
-export const userHas = (id, role, perm) => { if (role === 'super_admin') return roleHas(role, perm); const o = ov(id); return o.deny.has(perm) ? false : o.grant.has(perm) || roleHas(role, perm); };
-export const userPerms = (id, role) => (role === 'super_admin' ? permsOf(role) : Object.keys(PERMISSIONS).filter((p) => userHas(id, role, p)));
+export const userHas = (id, role, perm) => { if (role === 'super_admin') return perm in PERMISSIONS && !SPECIAL.includes(perm); /* le super-administrateur a toujours tout (espaces personnels exceptés) */ const o = ov(id); return o.deny.has(perm) ? false : o.grant.has(perm) || roleHas(role, perm); };
+export const userPerms = (id, role) => (role === 'super_admin' ? Object.keys(PERMISSIONS).filter((p) => !SPECIAL.includes(p)) : Object.keys(PERMISSIONS).filter((p) => userHas(id, role, p)));
 export const overridesOf = (id) => { const o = ov(id); return { ...Object.fromEntries([...o.grant].map((p) => [p, 'grant'])), ...Object.fromEntries([...o.deny].map((p) => [p, 'deny'])) }; };
-// Rôles qu'un administrateur peut attribuer (jamais plus élevé que le sien) - inclut les rôles personnalisés créés par le super-administrateur.
+// Rôles qu'un administrateur peut attribuer (jamais plus élevé que le sien) — inclut les rôles personnalisés créés par le super-administrateur.
 export const assignableRoles = (actorRole) => {
   const all_ = all('SELECT code FROM roles').map((r) => r.code);
   if (actorRole === 'super_admin') return all_;

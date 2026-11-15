@@ -12,12 +12,12 @@ export default function Alerts() {
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.pad} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={reload} />}>
       <Text style={s.h1}>{t('alerts')}</Text>
-      <Sec title="Périmés en stock" items={a?.expired} kind="bad" line={(x) => `${x.name} - lot ${x.batch_no} (${x.exp_date}) × ${x.qty}`} />
-      <Sec title="Péremption proche" items={a?.expiring} kind="warn" line={(x) => `${x.name} - lot ${x.batch_no}, ${x.days_left} j × ${x.qty}`} />
+      <Sec title="Périmés en stock" items={a?.expired} kind="bad" line={(x) => `${x.name} — lot ${x.batch_no} (${x.exp_date}) × ${x.qty}`} />
+      <Sec title="Péremption proche" items={a?.expiring} kind="warn" line={(x) => `${x.name} — lot ${x.batch_no}, ${x.days_left} j × ${x.qty}`} />
       <Sec title="Ruptures" items={a?.out} kind="bad" line={(x) => x.name} />
       <Sec title="Stock critique" items={a?.critical} kind="bad" line={(x) => `${x.name} (${x.sellable})`} />
       <Sec title="Stock bas" items={a?.low} kind="warn" line={(x) => `${x.name} (${x.sellable}/${x.min_stock})`} />
-      <Sec title="Lots bloqués / rappelés" items={a?.blocked} kind="bad" line={(x) => `${x.name ?? ''} - lot ${x.batch_no ?? ''}`} />
+      <Sec title="Lots bloqués / rappelés" items={a?.blocked} kind="bad" line={(x) => `${x.name ?? ''} — lot ${x.batch_no ?? ''}`} />
     </ScrollView>
   );
 }
