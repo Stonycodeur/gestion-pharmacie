@@ -1,6 +1,6 @@
 // Espace client : accueil personnalisable, commandes + paiement en ligne, suivi de livraison en temps réel, personnalisation.
 import { get, post, put, state } from '../api.js';
-import { soft } from '../silent.js';
+import { soft, changed } from '../silent.js';
 import { h, clear, money, table, badge, fail, toast, when, statusBadge, formModal, modal, icon, historyToggle, pastBlock } from '../ui.js';
 import { t } from '../i18n.js';
 import { onEvent } from '../events.js';
@@ -26,9 +26,13 @@ async function timelineModal(o) {
   draw(); modal(`${t('Historique')} — ${r.number}`, h('div', {}, h('div', { class: 'muted', style: { marginBottom: '8px' } }, r.pharmacy), chips, list), { wide: true });
 }
 
-export async function orders(body, reload) {
+export async function orders(body, reload, silent = false) {
   await loadMethods('online'); const r = await get('/portal/orders'); const online = methodsNow().filter((m) => m.code);
-  clearInterval(body._iv); body._iv = setInterval(() => { if (!body.isConnected) clearInterval(body._iv); else soft(body, () => reload('orders')); }, 30000);
+  if (body.dataset.tab && body.dataset.tab !== 'orders') return; // l'utilisateur a changé d'onglet pendant le chargement : on ne touche à rien
+  if (!changed(body, r) && silent) return; // mêmes données : aucun redessin, rien ne bouge à l'écran
+  if (silent) clear(body);
+  // filet de sécurité (l'essentiel arrive en temps réel par évènement) ; s'arrête dès qu'on quitte l'onglet — il ne ramène plus jamais à « Mes commandes »
+  clearInterval(body._iv); body._iv = setInterval(() => { if (!body.isConnected || body.dataset.tab !== 'orders') clearInterval(body._iv); else soft(body, () => orders(body, reload, true)); }, 60000);
   const pay = (o) => import('./payments2.js').then((m) => m.payDialog(o, reload));
   const fmtP = (v, q) => `${(v / 10 ** (q.decimals ?? 0)).toLocaleString(undefined, { minimumFractionDigits: q.decimals ?? 0, maximumFractionDigits: q.decimals ?? 0 })} ${q.currency || ''}`.trim();
   const deliver = async (o) => {
@@ -100,12 +104,12 @@ export async function deliveries(body) {
         h('button', { class: 'btn sm danger', onclick: async () => { try { await post(`/portal/deliveries/${d.id}/offers/${o.id}/refuse`, {}); toast(t('Prix refusé : choisissez un autre chauffeur')); draw(); chooseDriver(d); } catch (e) { fail(e); } } }, icon('x', { size: 14 }), t('Refuser et choisir un autre chauffeur')))), holder); }
     if (started || d.driver) partiesCard('/portal', d.id, 'customer').then((pc) => c.insertBefore(pc, holder)).catch(() => {});
     c.append(act); if (['in_progress', 'received', 'issued'].includes(d.status)) { const p = await live(d, holder); if (d.status === 'in_progress') (timer ||= []).push(p); } return c; };
-  const draw = async () => { const l = await get('/portal/deliveries'); timer = null; clear(box); if (!l.length) { box.append(h('div', { class: 'empty' }, t('Aucune livraison. Demandez la livraison depuis « Mes commandes ».'))); return; } const closed = (d) => ['delivered', 'failed', 'cancelled'].includes(d.status), q = sq.value.trim().toLowerCase(), l2 = l.filter((d) => !q || JSON.stringify(d).toLowerCase().includes(q)), cur = l2.filter((d) => !closed(d) || d.can_relaunch || d.relaunch_status === 'requested'), past = l2.filter((d) => !cur.includes(d));
+  const draw = async (silent = false) => { const l = await get('/portal/deliveries'); if (!changed(box, l) && silent) return; timer = null; clear(box); if (!l.length) { box.append(h('div', { class: 'empty' }, t('Aucune livraison. Demandez la livraison depuis « Mes commandes ».'))); return; } const closed = (d) => ['delivered', 'failed', 'cancelled'].includes(d.status), q = sq.value.trim().toLowerCase(), l2 = l.filter((d) => !q || JSON.stringify(d).toLowerCase().includes(q)), cur = l2.filter((d) => !closed(d) || d.can_relaunch || d.relaunch_status === 'requested'), past = l2.filter((d) => !cur.includes(d));
     box.append(h('h2', {}, t('Livraisons actuelles'))); if (!cur.length) box.append(h('div', { class: 'empty card' }, t('Aucune livraison en cours'))); for (const d of cur) box.append(await card(d));
     if (past.length) box.append(pastBlock({ title: 'Livraisons passées', rows: past, statuses: { delivered: 'Livrée', failed: 'Échec', cancelled: 'Annulée' }, text: (d) => JSON.stringify([d.number, d.order_number, d.address, d.driver?.name, d.pharmacy_name, d.mode_label, d.created_at, d.fee]),
       filters: [{ label: 'Tous les modes', get: (d) => d.mode_label }, { label: 'Tous les chauffeurs', get: (d) => d.driver?.name }, { label: 'Toutes les pharmacies', get: (d) => d.pharmacy_name }], render: async (rows) => { const w = h('div'); for (const d of rows) w.append(await card(d)); return w; } })); if (!l2.length) box.append(h('div', { class: 'empty' }, 'Aucun résultat')); };
   body.append(h('div', { class: 'muted', style: { marginBottom: '8px' } }, h('span', { class: 'live' }), t('Suivi en temps réel')), sq, box); sq.oninput = () => draw().catch(() => {}); await draw();
-  const tick = () => (timer || []).forEach((p) => p()); onEvent('driver_location', tick, body); onEvent('delivery', () => soft(box, draw), body); onEvent('order', () => soft(box, draw), body);
+  const tick = () => (timer || []).forEach((p) => p()); onEvent('driver_location', tick, body); onEvent('delivery', () => soft(box, () => draw(true)), body); onEvent('order', () => soft(box, () => draw(true)), body);
 }
 export async function appointments(body) {
   const phs = (await get('/portal/pharmacies')).filter((p) => p.appointments_enabled); const mine = await get('/portal/appointments');

@@ -1,7 +1,7 @@
 // Espace chauffeur : disponibilité, courses proposées (accepter au prix du tarif ou proposer le sien), « produit récupéré », GPS en direct,
 // messagerie / appel / note / signalement, photo de profil et pièce d'identité. Fonctionne en données mobiles, Wi-Fi et hors connexion (file d'attente).
 import { get, post, put, postQueued, state } from '../api.js';
-import { soft } from '../silent.js';
+import { soft, changed } from '../silent.js';
 import { h, clear, fail, toast, badge, icon, money, formModal, modal, fromMinor, toMinor, historyToggle, when, pastBlock } from '../ui.js';
 import { mapView, fmtM, stars, locate, filePicker, previewFile, directionsLink } from '../net.js';
 import { onEvent } from '../events.js';
@@ -23,10 +23,11 @@ const postQueuedLoc = async (c) => { try { await post('/driver/location', { lat:
 export default async function (box) {
   const root = h('div'); box.append(h('h1', {}, 'Espace chauffeur'), root); let me, busy = false;
   const act = (fn) => async () => { try { await fn(); } catch (e) { fail(e); } };
-  const draw = async () => {
+  const draw = async (silent = false) => {
     if (busy) return; busy = true;
     try {
       me = await get('/driver/me'); const [dl, of] = await Promise.all([get('/driver/deliveries'), get('/driver/offers').catch(() => ({ data: [] }))]); const hid = await get('/driver/offers?hidden=1').catch(() => ({ data: [] })); clear(root);
+      if (silent && !changed(root, [me, dl, of, hid])) return; // rien de nouveau : l'écran ne bouge pas
       const [avl, avk] = AV[me.availability], gpsOn = watch != null; const tariffsBox = await tariffs();
       root.append(h('div', { class: 'grid g2' },
         h('div', { class: 'card' }, h('div', { class: 'offer' }, h('button', { class: 'linklike', type: 'button', 'aria-label': 'Changer ma photo de profil', onclick: () => photoModal() }, avatar(me.photo_url, me.name, 64)), h('div', { style: { flex: 1 } }, h('h2', { style: { margin: 0 } }, me.name), h('div', { class: 'muted' }, `${me.vehicle_type} · ${me.plate || me.matricule}`), h('div', {}, stars(me.rating), me.rating_count ? h('small', { class: 'muted' }, ` (${me.rating_count} avis)`) : null)), badge(avl, avk)),
@@ -97,7 +98,7 @@ export default async function (box) {
   const photoModal = () => { const fp = filePicker({ accept: 'image/jpeg,image/png,image/webp', square: true, label: 'Photo de profil (visage)' }); formModal('Photo de profil', [], async () => { if (!fp.file) throw new Error('Choisissez une photo'); await put('/driver/me/photo', { file: await fp.payload() }); toast('Photo enregistrée'); draw(); }, { extra: fp.el }); };
   const idModal = () => { const fp = filePicker({ label: 'Scan ou photo de la pièce (JPEG, PNG ou PDF, 3 Mo max)' }); formModal('Pièce d\'identité', [{ name: 'type', label: 'Type de pièce', type: 'select', required: true, value: 'cni', options: [{ value: 'cni', label: 'Carte d\'identité' }, { value: 'passport', label: 'Passeport' }, { value: 'permis', label: 'Permis de conduire' }, { value: 'autre', label: 'Autre' }] }, { name: 'number', label: 'Numéro de la pièce' }], async (v) => { if (!fp.file) throw new Error('Choisissez un fichier'); await put('/driver/me/id-doc', { ...v, file: await fp.payload() }); toast('Pièce enregistrée (visible uniquement par l\'administration)'); draw(); }, { extra: fp.el }); };
   const profileModal = () => formModal('Mon véhicule et mes coordonnées', [{ name: 'vehicle_type', label: 'Type de véhicule', type: 'select', required: true, value: me.vehicle_type, options: ['moto', 'scooter', 'velo', 'voiture', 'camionnette', 'taxi'] }, { name: 'vehicle', label: 'Modèle', value: me.vehicle || '' }, { name: 'plate', label: 'Plaque', value: me.plate || '' }, { name: 'phone', label: 'Téléphone', type: 'phone', value: me.phone || '' }, { name: 'home_address', label: 'Adresse', value: me.home_address || '' }, { name: 'wait_min', label: 'Attente moyenne (minutes)', type: 'number', value: me.wait_min }, { name: 'speed_kmh', label: 'Vitesse moyenne (km/h)', type: 'number', value: me.speed_kmh }], async (v) => { await put('/driver/me', v); toast('Profil mis à jour'); draw(); }, { wide: true });
-  onEvent('delivery', () => soft(root, draw), root); onEvent('notification', () => soft(root, draw), root);
-  const iv = setInterval(() => { if (!root.isConnected) return clearInterval(iv); if (navigator.onLine) soft(root, draw); }, 20000);
+  onEvent('delivery', () => soft(root, () => draw(true)), root); onEvent('notification', () => soft(root, () => draw(true)), root);
+  const iv = setInterval(() => { if (!root.isConnected) return clearInterval(iv); if (navigator.onLine) soft(root, () => draw(true)); }, 30000);
   await draw(); if (me?.availability && me.availability !== 'offline' && watch == null) startGps();
 }

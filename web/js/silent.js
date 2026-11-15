@@ -32,3 +32,8 @@ export function soft(root, redraw) {
   const s = snapshot(root), h0 = root.offsetHeight; root.style.minHeight = h0 + 'px'; // évite le saut de page pendant le rechargement
   return Promise.resolve().then(redraw).then(() => { restore(root, s); return true; }).catch(() => false).finally(() => setTimeout(() => { root.style.minHeight = ''; }, 400));
 }
+
+// Mise à jour « sans rien voir » : on ne redessine que si les DONNÉES ont réellement changé (les champs qui bougent en continu —
+// position GPS, distances, délais — sont ignorés ; la carte et le suivi se mettent à jour séparément, sur place).
+const VOLATILE = /(lat|lng|heading|speed|eta|distance|_m$|_min$|updated|last_seen|seen|ts$)/i;
+export function changed(el, data) { const s = JSON.stringify(data, (k, v) => (VOLATILE.test(k) ? undefined : v)); if (el._sig === s) return false; el._sig = s; return true; }

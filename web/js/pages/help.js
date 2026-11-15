@@ -12,11 +12,12 @@ const isCustomer = () => can('portal.use') && !can('help.view');
 export default async function (box) {
   const body = h('div'); const customer = isCustomer(); let tab = 'in';
   const show = (id) => { tab = id; draw(); };
-  const draw = () => { clear(body); (tab === 'search' ? search : list)(body, tab, customer, show).catch(fail); };
+  const run = (b) => (tab === 'search' ? search : list)(b, tab, customer, show).catch(fail);
+  const draw = (silent = false) => { if (!silent) { clear(body); return run(body); } const tmp = h('div'); return run(tmp).then(() => { if (tmp.innerHTML !== body.innerHTML) body.replaceChildren(...tmp.childNodes); }); }; // mise à jour : rendu hors écran, remplacé seulement si différent
   const items = customer ? [['in', 'Mes conversations']] : [['in', 'Reçus'], ['out', 'Envoyés'], ...(can('inter.search') ? [['search', 'Rechercher chez d\'autres pharmacies']] : [])];
   const head = h('div'); const nav = () => clear(head).append(h('div', { class: 'row between' }, tabs(items, tab, show), h('button', { class: 'btn primary', onclick: () => compose(customer, draw) }, icon('plus', { size: 16 }), customer ? 'Écrire à une pharmacie' : 'Contacter une pharmacie')));
   box.append(h('h1', {}, 'Centre d\'aide'), head, body); nav(); draw();
-  onEvent('help', () => { if (tab !== 'search') soft(body, draw); }, box);
+  onEvent('help', () => { if (tab !== 'search') soft(body, () => draw(true)); }, box);
   const t0 = new URLSearchParams(location.hash.split('?')[1] || '').get('ticket'); if (t0) openTicket(Number(t0), customer, draw);
 }
 

@@ -1,7 +1,7 @@
 // Livraisons à domicile (personnel) : file d'attente en temps réel, affectation du chauffeur, avancement, gestion des chauffeurs.
 import { get, post, put, del, can } from '../api.js';
 import { mapView, fmtM, stars, locate } from '../net.js';
-import { soft } from '../silent.js';
+import { soft, changed } from '../silent.js';
 import { h, clear, table, badge, formModal, modal, fail, toast, when, tabs, confirmDialog, icon, money, historyToggle } from '../ui.js';
 import { t } from '../i18n.js';
 import { onEvent } from '../events.js';
@@ -33,8 +33,8 @@ function pastSection(past, statuses, getCols) {
 export default async function (box) {
   const adm = can('drivers.admin'); let tab = 'queue', filter = '', everyPh = false; const head = h('div'), body = h('div'); const manage = can('deliveries.manage');
   const show = (id) => { tab = id; clear(head).append(tabs([['queue', 'Livraisons'], ['drivers', 'Chauffeurs'], ['map', 'Carte en direct'], ['ratings', 'Notes'], ['reports', 'Signalements']], tab, show)); clear(body); ({ queue, drivers, map: liveMap, reports, ratings })[tab]().catch(fail); };
-  async function queue() {
-    const [r, drv] = await Promise.all([get('/deliveries?' + [filter ? 'status=' + filter : '', everyPh ? 'all=1' : ''].filter(Boolean).join('&')), get('/drivers')]); const active = drv.filter((x) => x.status === 'active');
+  async function queue(silent = false) {
+    const [r, drv] = await Promise.all([get('/deliveries?' + [filter ? 'status=' + filter : '', everyPh ? 'all=1' : ''].filter(Boolean).join('&')), get('/drivers')]); if (!changed(body, [r, drv]) && silent) return; const active = drv.filter((x) => x.status === 'active');
     const pick = (d, label, to) => formModal(label, [{ name: 'driver_id', label: 'Chauffeur', type: 'select', required: to === 'in_progress', options: active.map((x) => ({ value: x.id, label: `${x.name} — ${x.matricule}` })), value: d.driver ? active.find((x) => x.matricule === d.driver.matricule)?.id : undefined }, { name: 'note', label: 'Note (facultatif)', type: 'text' }], async (v) => { await post(`/deliveries/${d.id}/status`, { status: to, ...v }); });
     const acts = (d) => h('span', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => details(d) }, icon('users', { size: 14 }), 'Profils'), h('button', { class: 'btn sm', 'aria-label': t('Suivi'), onclick: () => modal(`${d.number} — ${d.status_label}`, timeline(d)) }, icon('history', { size: 14 }), t('Suivi')), d.status === 'in_progress' || d.driver ? h('button', { class: 'btn sm', onclick: () => trackModal(d) }, icon('pin', { size: 14 }), 'Carte') : null, h('button', { class: 'btn sm', onclick: () => chat(d) }, icon('message', { size: 14 }), 'Messages'),
       manage && d.status === 'issued' ? h('button', { class: 'btn sm primary', onclick: async () => { try { await post(`/deliveries/${d.id}/status`, { status: 'received' }); } catch (e) { fail(e); } } }, 'Accuser réception') : null,
@@ -92,5 +92,5 @@ export default async function (box) {
     { label: 'Pièce jointe', render: (x) => (x.has_file ? h('button', { class: 'btn sm', onclick: () => previewFile({ name: x.file_name || 'Pièce jointe', mime: /\.pdf$/i.test(x.file_name || '') ? 'application/pdf' : 'image/jpeg' }, `/delivery-files/report/${x.id}`) }, icon('file', { size: 14 }), 'Voir') : '—') },
     { label: '', render: (x) => manage && x.status === 'open' ? h('span', { class: 'row' }, h('button', { class: 'btn sm primary', onclick: async () => { await put('/delivery-reports/' + x.id, { status: 'reviewed' }); reports(); } }, 'Traité'), h('button', { class: 'btn sm', onclick: async () => { await put('/delivery-reports/' + x.id, { status: 'dismissed' }); reports(); } }, 'Classer')) : null }], r, { empty: 'Aucun signalement' })); }
   box.append(h('h1', {}, t('Livraisons')), head, body);
-  onEvent('delivery', () => { if (tab === 'queue') soft(body, queue); }, box); show('queue');
+  onEvent('delivery', () => { if (tab === 'queue') soft(body, () => queue(true)); }, box); show('queue');
 }
