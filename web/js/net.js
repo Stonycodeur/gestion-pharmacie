@@ -163,16 +163,21 @@ import { blobUrl, download } from './api.js';
 export const b64 = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(f); });
 // Photo de profil : recadrage carré centré sur le visage (détection native si disponible), réglable par curseurs, identique sur tous les appareils.
 async function faceCenter(bmp) { try { if ('FaceDetector' in window) { const f = (await new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 }).detect(bmp))[0]; if (f) return { x: (f.boundingBox.x + f.boundingBox.width / 2) / bmp.width, y: (f.boundingBox.y + f.boundingBox.height / 2) / bmp.height }; } } catch { /* détecteur indisponible */ } return null; }
+// Transparence : détecte un fond transparent (photo détourée) ; dans ce cas on cadre sur la personne et on garde l'alpha (PNG), sans fond blanc.
+function alphaBox(bmp) { try { const W = 128, k = W / Math.max(bmp.width, bmp.height), w = Math.max(1, Math.round(bmp.width * k)), hh = Math.max(1, Math.round(bmp.height * k)), c = document.createElement('canvas'); c.width = w; c.height = hh; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(bmp, 0, 0, w, hh); const d = x.getImageData(0, 0, w, hh).data; let x0 = w, y0 = hh, x1 = -1, y1 = -1, clear = 0;
+  for (let j = 0; j < hh; j++) for (let i = 0; i < w; i++) { if (d[(j * w + i) * 4 + 3] > 24) { if (i < x0) x0 = i; if (i > x1) x1 = i; if (j < y0) y0 = j; if (j > y1) y1 = j; } else clear++; }
+  if (x1 < 0 || clear / (w * hh) < 0.03) return null; return { x: x0 / k, y: y0 / k, w: (x1 - x0 + 1) / k, h: (y1 - y0 + 1) / k }; } catch { return null; } }
 function squareEditor(bmp, face) {
-  const s = Math.min(bmp.width, bmp.height), slackX = bmp.width - s, slackY = bmp.height - s;
-  // position du carré : sur le visage s'il est détecté ; sinon centré, légèrement vers le haut (les visages sont dans le tiers supérieur d'un portrait)
+  const box = alphaBox(bmp), cut = !!box; let s = Math.min(bmp.width, bmp.height), slackX = bmp.width - s, slackY = bmp.height - s;
+  // source du carré : photo détourée → la personne entière (marge 6 %), alignée en bas ; sinon carré réglable centré sur le visage
   const pos = { x: face && slackX ? Math.min(1, Math.max(0, (face.x * bmp.width - s / 2) / slackX)) : 0.5, y: face && slackY ? Math.min(1, Math.max(0, (face.y * bmp.height - s / 2) / slackY)) : 0.3 };
-  const cv = h('canvas', { width: 160, height: 160, class: 'avatar-lg', style: { width: '120px', height: '120px', borderRadius: '50%' }, role: 'img', 'aria-label': 'Aperçu de la photo de profil' });
-  const draw = (c, out) => { const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, out, out); x.drawImage(bmp, slackX * pos.x, slackY * pos.y, s, s, 0, 0, out, out); };
+  const src = () => { if (!cut) return [slackX * pos.x, slackY * pos.y, s, s]; const side = Math.max(box.w, box.h) * 1.06, cx = box.x + box.w / 2; return [cx - side / 2, box.y + box.h - side + side * 0.03, side, side]; };
+  const cv = h('canvas', { width: 160, height: 160, class: cut ? 'cutout' : 'avatar-lg', style: { width: '120px', height: '120px', borderRadius: cut ? '0' : '50%' }, role: 'img', 'aria-label': 'Aperçu de la photo de profil' });
+  const draw = (c, out) => { const x = c.getContext('2d'); x.clearRect(0, 0, out, out); if (!cut) { x.fillStyle = '#fff'; x.fillRect(0, 0, out, out); } const [sx, sy, sw, sh] = src(); x.drawImage(bmp, sx, sy, sw, sh, 0, 0, out, out); };
   const slider = (label, key, on) => h('label', { class: 'f', style: { opacity: on ? 1 : .4 } }, label, h('input', { type: 'range', min: 0, max: 100, value: Math.round(pos[key] * 100), disabled: !on, oninput: (e) => { pos[key] = e.target.value / 100; draw(cv, 160); } }));
   draw(cv, 160);
-  return { el: h('div', { class: 'row', style: { gap: '14px', alignItems: 'center', flexWrap: 'wrap' } }, cv, h('div', { style: { flex: 1, minWidth: '160px' } }, h('small', { class: 'muted' }, 'Ajustez pour que le visage soit bien dans le cercle'), slider('Horizontal', 'x', slackX > 1), slider('Vertical', 'y', slackY > 1))),
-    async blob() { const c = document.createElement('canvas'); c.width = c.height = 512; draw(c, 512); return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9)); } };
+  return { cut, el: h('div', { class: 'row', style: { gap: '14px', alignItems: 'center', flexWrap: 'wrap' } }, cv, cut ? h('small', { class: 'muted', style: { flex: 1, minWidth: '160px' } }, 'Photo à fond transparent détectée : seule la personne sera affichée, sans cadre ni arrière-plan.') : h('div', { style: { flex: 1, minWidth: '160px' } }, h('small', { class: 'muted' }, 'Ajustez pour que le visage soit bien dans le cercle'), slider('Horizontal', 'x', slackX > 1), slider('Vertical', 'y', slackY > 1))),
+    async blob() { let b; for (const n of [512, 400, 320, 256]) { const c = document.createElement('canvas'); c.width = c.height = n; draw(c, n); b = await new Promise((res) => c.toBlob(res, cut ? 'image/png' : 'image/jpeg', 0.9)); if (b.size <= 900000) break; } return b; } }; // < 1 Mo (limite serveur)
 }
 export function filePicker({ accept = 'image/jpeg,image/png,application/pdf', max = 3 * 1024 * 1024, label = 'Joindre un fichier', square = false } = {}) {
   const inp = h('input', { type: 'file', accept }), prev = h('div', { class: 'muted' }); let file = null, editor = null;
@@ -185,7 +190,7 @@ export function filePicker({ accept = 'image/jpeg,image/png,application/pdf', ma
     const url = URL.createObjectURL(file);
     prev.append(file.type === 'application/pdf' ? h('div', {}, h('a', { href: url, target: '_blank', rel: 'noopener' }, `Aperçu du PDF : ${file.name}`), h('iframe', { src: url, title: 'Aperçu', style: { width: '100%', height: '260px', border: '1px solid var(--line)', borderRadius: '8px', marginTop: '6px' } })) : h('img', { src: url, alt: 'Aperçu avant envoi', style: { maxWidth: '100%', maxHeight: '240px', borderRadius: '8px', border: '1px solid var(--line)' } }), h('div', { class: 'muted' }, `${file.name} · ${(file.size / 1024).toFixed(0)} Ko`));
   });
-  return { el: h('label', { class: 'f' }, label, inp, prev), get file() { return file; }, payload: async () => (file ? editor ? { mime: 'image/jpeg', name: 'photo.jpg', data_base64: await b64(await editor.blob()) } : { mime: file.type, name: file.name, data_base64: await b64(file) } : undefined) };
+  return { el: h('label', { class: 'f' }, label, inp, prev), get file() { return file; }, payload: async () => (file ? editor ? { mime: editor.cut ? 'image/png' : 'image/jpeg', name: editor.cut ? 'photo.png' : 'photo.jpg', data_base64: await b64(await editor.blob()) } : { mime: file.type, name: file.name, data_base64: await b64(file) } : undefined) };
 }
 export async function previewFile(f, path) {
   try {

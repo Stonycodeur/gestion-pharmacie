@@ -267,3 +267,6 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) naviga
   }
 })();
 
+// Photo détourée : si les coins de l'image sont transparents, on affiche seulement la personne (sans cadre ni fond).
+document.addEventListener('load', (e) => { const im = e.target; if (!(im instanceof HTMLImageElement) || !/avatar/.test(im.className) || !im.naturalWidth) return;
+  try { const c = document.createElement('canvas'); c.width = c.height = 16; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0, 16, 16); const px = [0, 15].flatMap((a) => [0, 15].map((b) => x.getImageData(a, b, 1, 1).data[3])); im.classList.toggle('cutout', px.every((a) => a < 40)); } catch { /* image d'une autre origine : cadre normal */ } }, true);
