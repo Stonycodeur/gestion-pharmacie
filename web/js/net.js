@@ -97,7 +97,7 @@ export function playSound(id = 'aurora', volume = 0.6) {
   const s = SOUNDS[id] || SOUNDS.aurora; if (!s.notes.length) return;
   if (!ctxA && navigator.userActivation && !navigator.userActivation.hasBeenActive) return; // pas encore de geste de l'utilisateur : silence (le navigateur interdit le son, sans erreur)
   try {
-    ctxA ||= new (window.AudioContext || window.webkitAudioContext)(); if (ctxA.state === 'suspended') ctxA.resume();
+    ctxA ||= new (window.AudioContext || window.webkitAudioContext)(); if (ctxA.state === 'suspended') ctxA.resume().catch(() => {});
     const t0 = ctxA.currentTime;
     for (const [f, at, dur] of s.notes) {
       const o = ctxA.createOscillator(), g = ctxA.createGain(); o.type = s.type; o.frequency.value = f;
@@ -112,7 +112,9 @@ export const setSoundPrefs = (p) => { try { localStorage.setItem(KEY(), JSON.str
 export const notifyBeep = () => { const p = soundPrefs(); if (!p.muted) playSound(p.sound, p.volume); };
 // débloque l'audio au premier geste (politique des navigateurs)
 // (seuls clic, touche et fin de toucher comptent comme « geste » pour l'audio ; pointerdown déclenchait l'avertissement)
-for (const ev of ['click', 'keydown', 'touchend']) addEventListener(ev, () => { try { ctxA ||= new (window.AudioContext || window.webkitAudioContext)(); if (ctxA.state === 'suspended') ctxA.resume(); } catch {} }, { once: true });
+const unlockAudio = () => { try { if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return; // touche Échap/Tab… ne sont pas des gestes valides : on attend un vrai clic
+  ctxA ||= new (window.AudioContext || window.webkitAudioContext)(); if (ctxA.state === 'suspended') ctxA.resume().catch(() => {}); if (ctxA.state === 'running') for (const ev of ['click', 'keydown', 'touchend']) removeEventListener(ev, unlockAudio); } catch { /* son impossible : sans gravité */ } };
+for (const ev of ['click', 'keydown', 'touchend']) addEventListener(ev, unlockAudio);
 
 // ---------- géolocalisation ----------
 export function locate({ timeout = 10000 } = {}) {
@@ -161,7 +163,7 @@ export function mapView({ points = [], path = [], height = 280, stage } = {}) {
 
 // ---------- fichiers : sélection avec aperçu avant envoi, aperçu après envoi (fichier privé servi avec le jeton) ----------
 import { modal, toast, fail } from './ui.js';
-import { blobUrl, download } from './api.js';
+import { blobUrl, blobOf, download } from './api.js';
 export const b64 = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(f); });
 // Photo de profil : recadrage carré centré sur le visage (détection native si disponible), réglable par curseurs, identique sur tous les appareils.
 async function faceCenter(bmp) { try { if ('FaceDetector' in window) { const f = (await new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 }).detect(bmp))[0]; if (f) return { x: (f.boundingBox.x + f.boundingBox.width / 2) / bmp.width, y: (f.boundingBox.y + f.boundingBox.height / 2) / bmp.height }; } } catch { /* détecteur indisponible */ } return null; }
@@ -196,9 +198,12 @@ export function filePicker({ accept = 'image/jpeg,image/png,application/pdf', ma
 }
 export async function previewFile(f, path) {
   try {
-    const url = await blobUrl(path || `/files/${f.id}/content`);
-    modal(f.name || 'Fichier', h('div', {}, f.mime === 'application/pdf' ? h('iframe', { src: url, title: f.name, style: { width: '100%', height: '60vh', border: 0 } }) : h('img', { src: url, alt: f.name, style: { maxWidth: '100%', maxHeight: '64vh', display: 'block', margin: 'auto' } }),
-      h('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '10px' } }, h('a', { class: 'btn', href: url, download: f.name || 'fichier' }, 'Télécharger'))), { wide: true });
+    // le type réel du fichier vient du serveur (image ou PDF) : on n'affiche plus un PDF dans une balise image
+    const blob = await blobOf(path || `/files/${f.id}/content`), url = URL.createObjectURL(blob), type = blob.type || f.mime || '', isPdf = /pdf/i.test(type), isImg = /^image\//i.test(type);
+    const view = isPdf ? h('iframe', { src: url, title: f.name, style: { width: '100%', height: '60vh', border: 0 } })
+      : isImg ? h('img', { src: url, alt: f.name, style: { maxWidth: '100%', maxHeight: '64vh', display: 'block', margin: '0 auto', borderRadius: '8px' } })
+        : h('p', { class: 'muted' }, 'Aperçu indisponible pour ce type de fichier : utilisez « Télécharger ».');
+    modal(f.name || 'Fichier', h('div', {}, view, h('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '10px' } }, h('a', { class: 'btn', href: url, download: f.name || 'fichier' }, 'Télécharger'))), { wide: true });
   } catch (e) { fail(e); }
 }
 export const stars = (n) => h('span', { class: 'stars', 'aria-label': n ? `${n} sur 5` : 'Pas encore noté' }, n ? '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n)) : '☆☆☆☆☆', n ? h('small', { class: 'muted' }, ` ${n}`) : null);

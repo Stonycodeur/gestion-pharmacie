@@ -62,6 +62,12 @@ router.post('/auth/guest', { public: true, ok200: true }, (ctx) => {
   const id = insert("INSERT INTO users(email,password_hash,name,role_code,pharmacy_id,must_change_password,is_guest,country_id) VALUES (?,?,?,?,NULL,0,1,?)", `guest-${tag}@guest.invalid`, hashPassword(randomToken(24) + 'aA1'), 'Invité', 'guest', gc);
   const u = get('SELECT * FROM users WHERE id=?', id); const { out, cookie } = issue(u, ctx); ctx.res.setHeader('Set-Cookie', cookie); audit({ ...ctx, ph: null }, 'auth.guest', 'user', id); return out;
 });
+// Une session reprenable existe-t-elle ? (ne consomme pas le jeton ; répond toujours 200 : pas d'erreur 401 à l'ouverture de la page de connexion)
+router.get('/auth/session', { public: true }, (ctx) => {
+  const token = cookieOf(ctx.req, 'rt'); if (!token) return { active: false };
+  const t = get('SELECT revoked,expires_at FROM refresh_tokens WHERE token_hash=?', sha256(token));
+  return { active: !!t && !t.revoked && t.expires_at >= nowSql() };
+});
 router.post('/auth/refresh', { public: true, ok200: true }, (ctx) => {
   const fromCookie = cookieOf(ctx.req, 'rt');
   if (fromCookie && ctx.req.headers['x-requested-with'] !== 'XMLHttpRequest') throw new HttpError(403, 'CSRF', 'En-tête requis');

@@ -21,10 +21,18 @@ const jwtExp = (t) => { try { return JSON.parse(atob(t.split('.')[1].replace(/-/
 let renewTimer = null;
 function scheduleRenew() { clearTimeout(renewTimer); if (!state.token) return; const exp = jwtExp(state.token); if (!exp) return; renewTimer = setTimeout(() => ensureFresh(true).catch(() => {}), Math.max(5000, exp - Date.now() - 90000)); }
 export async function ensureFresh(force = false) { if (!state.token) return; const exp = jwtExp(state.token); if (force || (exp && exp - Date.now() < 45000)) await refresh(); }
-export function setSession(d) { state.impersonating = !!d.impersonating; setScope(d.user?.id); state.token = d.access_token; state.user = d.user; state.perms = new Set(d.permissions || []); scheduleRenew(); }
+export function setSession(d) { state.impersonating = !!d.impersonating; setScope(d.user?.id); state.token = d.access_token; state.user = d.user; state.perms = new Set(d.permissions || []); hint(true); scheduleRenew(); }
 for (const ev of ['visibilitychange', 'online', 'focus']) addEventListener(ev, () => { if (document.visibilityState !== 'hidden') ensureFresh().catch(() => {}); });
+// Mémo local « une session existe » : évite la requête de reprise de session (et son 401 dans la console) quand on sait qu'on est déconnecté.
+const HINT = 'gp.session';
+const hint = (v) => { try { v ? localStorage.setItem(HINT, '1') : localStorage.setItem(HINT, '0'); } catch { /* stockage indisponible */ } };
+export const mayHaveSession = () => { try { return localStorage.getItem(HINT) !== '0'; } catch { return true; } };
+export async function sessionActive() { try { const r = await raw('GET', '/auth/session', undefined, { noAuth: true }); return r.ok ? !!(await r.json()).active : true; } catch { return true; } }
+export const endSession = () => { hint(false); clearTimeout(renewTimer); };
 export async function refresh() {
-  refreshing ||= (async () => { const r = await raw('POST', '/auth/refresh', {}, { noAuth: true }); if (!r.ok) throw new ApiError(r.status, await r.json().catch(() => null)); const d = await r.json(); setSession(d); return d; })().finally(() => { refreshing = null; });
+  // un seul renouvellement à la fois, aussi entre plusieurs onglets (verrou navigateur) : le jeton de renouvellement tourne à chaque usage
+  const once = async () => { const r = await raw('POST', '/auth/refresh', {}, { noAuth: true }); if (!r.ok) { if (r.status === 401) hint(false); throw new ApiError(r.status, await r.json().catch(() => null)); } const d = await r.json(); setSession(d); return d; };
+  refreshing ||= (navigator.locks ? navigator.locks.request('gp-refresh', once) : once()).finally(() => { refreshing = null; });
   return refreshing;
 }
 export async function api(method, path, body) {
@@ -47,6 +55,7 @@ export async function download(path, filename) {
   const r = await raw('GET', path); if (!r.ok) throw new ApiError(r.status, await r.json().catch(() => null));
   const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+export async function blobOf(path) { const r = await raw('GET', path); if (!r.ok) throw new ApiError(r.status, await r.json().catch(() => null)); return r.blob(); }
 export async function blobUrl(path) { const r = await raw('GET', path); if (!r.ok) throw new ApiError(r.status, null); return URL.createObjectURL(await r.blob()); }
 
 // Temps réel (SSE via fetch pour pouvoir envoyer l'en-tête Authorization)

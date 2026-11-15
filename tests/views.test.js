@@ -99,3 +99,14 @@ test('historique complet d\'une commande : statuts, messages, paiements, livrais
   const o2 = await customerOrder('v4'); assert.equal((await call('GET', `/portal/orders/${o.id}/timeline`, null, o2.t)).status, 404);
   const l = (await call('GET', '/portal/orders', null, o.t)).body.find((x) => x.id === o.id); assert.ok(l.products && l.decimals !== undefined, 'produits + décimales pour la recherche/filtre');
 });
+
+test('reprise de session sans 401 (/auth/session) et pièce d\'identité PDF/PNG visible par le chauffeur et l\'administrateur', async () => {
+  assert.deepEqual((await call('GET', '/auth/session', null)).body, { active: false });
+  const adm = await login('admin'); const d = await mkDriver(adm, '5');
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n').toString('base64'), png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+  for (const [mime, name, data] of [['application/pdf', 'cni.pdf', pdf], ['image/png', 'cni.png', png]]) {
+    const up = await call('PUT', '/driver/me/id-doc', { type: 'cni', number: '123', file: { mime, name, data_base64: data } }, d.t); assert.equal(up.status, 200, JSON.stringify(up.body));
+    const mine = await call('GET', '/driver/me/id-doc', null, d.t); assert.equal(mine.status, 200); assert.equal(mine.headers.get('content-type'), mime, 'le chauffeur voit sa pièce, avec son vrai type');
+    const adminView = await call('GET', `/drivers/${d.id}/id-doc`, null, adm); assert.equal(adminView.status, 200); assert.equal(adminView.headers.get('content-type'), mime); assert.ok(adminView.raw.length > 20);
+  }
+});

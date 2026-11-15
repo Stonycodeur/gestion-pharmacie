@@ -1,6 +1,6 @@
 import { syncPrefs, stopSync } from './prefsync.js';
 import { emit } from './events.js';
-import { state, api, get, post, refresh, setSession, can, listen, ApiError } from './api.js';
+import { state, api, get, post, refresh, setSession, can, listen, ApiError, mayHaveSession, endSession, sessionActive } from './api.js';
 import { h, clear, toast, fail, formModal, modal, when, icon, skeleton } from './ui.js';
 import { t, lang, setLang, languages, loadLanguages, loadPack } from './i18n.js';
 import { setBrand, getPrefs, setPrefs, isDark, onTheme } from './theme.js';
@@ -222,7 +222,7 @@ async function loadNotifs() {
 }
 async function logout() {
   sse?.abort(); const keep = net.pending + net.conflicts > 0;
-  stopSync(); await nativeLogout(api); try { await post('/auth/logout', {}); } catch {} state.token = null; state.perms = new Set(); state.offline = false; state.phOverride = null; location.hash = '';
+  stopSync(); await nativeLogout(api); try { await post('/auth/logout', {}); } catch {} endSession(); state.token = null; state.perms = new Set(); state.offline = false; state.phOverride = null; location.hash = '';
   if (keep) toast('Des ventes hors ligne ne sont pas encore synchronisées : elles restent sur cet appareil.', true); else await wipeAll();
   loginScreen();
 }
@@ -260,7 +260,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) naviga
   await loadLanguages().catch(() => {});
   try { const b = await fetch('/api/v1/branding').then((r) => (r.ok ? r.json() : null)); if (b) { brandName = b.name || ''; setBrand(b.color); } } catch { const c = await loadProfile(); if (c?.pharmacy?.name) brandName = c.pharmacy.name; }
   const rt = location.hash.match(/^#\/reset\?token=([\w-]+)/); if (rt) return resetScreen(rt[1]);
-  try { const d = await refresh(); await boot(d); }
+  try { if (!mayHaveSession() || !(await sessionActive())) throw new ApiError(401, null); const d = await refresh(); await boot(d); }
   catch (e) {
     if (e.status === 0) { const p = await loadProfile(); if (p) return unlockScreen(p); return loginScreen('Hors connexion : première connexion impossible sans réseau.'); }
     try { const st = await api('GET', '/auth/setup-status'); st.needed ? setupScreen(st) : loginScreen(); } catch { loginScreen(); }

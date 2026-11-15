@@ -174,3 +174,11 @@ Au premier lancement la base est vide : l'écran « Première configuration » c
 ## Correctif — plus d'erreurs 401 / avertissement audio dans la console
 - **Cause** : le jeton d'accès dure 15 min ; passé ce délai, le flux temps réel (`/events`) et l'enregistrement des préférences partaient avec un jeton expiré (401 répétés, puis renouvellement). Désormais le jeton est **renouvelé avant son expiration** (minuterie, retour sur l'onglet, retour du réseau, vérification avant chaque requête) et le flux temps réel se reconnecte aussitôt avec un jeton neuf. Testé avec des jetons de 1 min pendant 2 min : 0 réponse 401, 0 erreur console.
 - **Avertissement « AudioContext was not allowed to start »** : le son n'est plus initialisé qu'après un vrai geste (clic, touche, toucher) ; avant cela la sonnerie reste silencieuse sans erreur.
+
+## Session silencieuse, pièce d'identité, audio
+
+- `GET /api/v1/auth/session` (public) → `{active}` : le client sonde avant tout rafraîchissement ; une visite neuve ne produit donc plus aucun 401 en console. Indice local `gp.session` ('0' = déconnecté).
+- Renouvellement du jeton protégé par `navigator.locks` (`gp-refresh`) : plusieurs onglets ne déclenchent plus de rotation concurrente (qui révoquait la famille de jetons).
+- Pièce d'identité du chauffeur : l'aperçu utilise le vrai type du fichier (PDF → iframe, image → img) ; visible par le chauffeur (« Voir ») et par l'admin (« Voir la pièce », audité).
+- Audio : déverrouillé seulement après une vraie activation utilisateur (plus d'avertissement AudioContext).
+- Test : `tests/views.test.js` (6 tests).
