@@ -66,7 +66,7 @@ export function formModal(title, fields, onSubmit, { submitLabel = 'Enregistrer'
       else if (f.type === 'textarea') el = h('textarea', { required: f.required, value: f.value ?? '' });
       else if (f.type === 'checkbox') el = h('input', { type: 'checkbox', checked: !!f.value, style: { width: 'auto', display: 'inline-block' } });
       else el = h('input', { type: f.type === 'money' ? 'number' : f.type || 'text', required: f.required, value: f.type === 'money' && f.value != null ? fromMinor(f.value) : f.value ?? '', step: f.type === 'money' ? 1 / 10 ** (state.pharmacy?.currency_decimals ?? 3) : f.step, min: f.min, max: f.max, maxLength: f.maxLength, placeholder: f.placeholder, autocomplete: f.type === 'password' ? 'new-password' : 'off' });
-      inputs[f.name] = el;
+      el.name = f.name; inputs[f.name] = el;
       return h('label', { class: 'f' }, t(f.label), f.required ? ' *' : '', el, f.hint ? h('small', {}, f.hint) : null);
     }), extra);
   // Lien pays → indicatif : le champ téléphone suit le pays de l'établissement choisi
@@ -118,8 +118,25 @@ export function pager(res, load) {
   return h('div', { class: 'pager' }, h('span', { class: 'muted' }, `${res.total} · ${res.page}/${pages}`),
     h('button', { class: 'btn sm', disabled: res.page <= 1, onclick: () => load(res.page - 1), 'aria-label': 'Précédent' }, icon(document.dir === 'rtl' ? 'right' : 'left', { size: 16 })), h('button', { class: 'btn sm', disabled: res.page >= pages, onclick: () => load(res.page + 1), 'aria-label': 'Suivant' }, icon(document.dir === 'rtl' ? 'left' : 'right', { size: 16 })));
 }
+// Onglets : l'onglet actif est marqué (trait + fond) et annoncé comme « vue courante » dans l'en-tête (évènement gp:view).
 export function tabs(items, active, onChange) {
-  return h('div', { class: 'tabs', role: 'tablist' }, items.map(([id, label]) => h('button', { role: 'tab', 'aria-selected': id === active, onclick: () => onChange(id) }, t(label))));
+  const cur = items.find(([id]) => id === active); if (cur) window.dispatchEvent(new CustomEvent('gp:view', { detail: t(cur[1]) }));
+  return h('div', { class: 'tabs', role: 'tablist' }, items.map(([id, label]) => h('button', { role: 'tab', type: 'button', 'aria-selected': id === active, 'aria-current': id === active ? 'page' : null, onclick: () => onChange(id) }, t(label))));
+}
+// Bloc repliable (▶) pour les éléments passés : « Commandes passées », « Livraisons passées », « Courses passées »…
+export function collapsible(title, { count, onOpen, open = false } = {}) {
+  const sum = h('summary', {}, h('span', { class: 'tri', 'aria-hidden': 'true' }, '▶'), h('strong', {}, t(title)), count != null ? h('span', { class: 'badge b-info', style: { marginInlineStart: '8px' } }, String(count)) : '');
+  const body = h('div', { class: 'past-body' }), el = h('details', { class: 'past history card' }, sum, body); if (open) el.open = true;
+  el.addEventListener('toggle', () => { if (el.open && onOpen) onOpen(body); }); return { el, body };
+}
+// Éléments passés d'une liste déjà chargée : recherche + date + statut. render(rows) renvoie un nœud (ou une promesse).
+export function pastBlock({ title, rows, statuses = {}, text = (r) => JSON.stringify(r), day = (r) => String(r.updated_at || r.created_at || '').slice(0, 10), stat = (r) => r.status, render, empty = 'Aucun élément passé' }) {
+  const q = h('input', { type: 'search', class: 'sr-search', placeholder: t('Rechercher…'), 'aria-label': t('Rechercher') }), from = h('input', { type: 'date', 'aria-label': t('Du') }), to = h('input', { type: 'date', 'aria-label': t('Au') });
+  const st = h('select', { 'aria-label': t('Statut') }, h('option', { value: '' }, t('Tous les statuts')), Object.entries(statuses).map(([k, l]) => h('option', { value: k }, t(l)))), out = h('div');
+  const draw = async () => { const k = q.value.trim().toLowerCase(); const list = rows.filter((r) => (!k || text(r).toLowerCase().includes(k)) && (!from.value || day(r) >= from.value) && (!to.value || day(r) <= to.value) && (!st.value || stat(r) === st.value)); const node = list.length ? await render(list) : h('div', { class: 'empty' }, t(empty)); clear(out).append(node); };
+  const c = collapsible(title, { count: rows.length, onOpen: () => draw().catch(() => {}) });
+  for (const el of [q, from, to, st]) { el.addEventListener('input', () => draw().catch(() => {})); el.addEventListener('change', () => draw().catch(() => {})); }
+  c.body.append(h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '8px', margin: '10px 0' } }, q, from, to, Object.keys(statuses).length ? st : ''), out); return c.el;
 }
 export const debounce = (fn, ms = 250) => { let to; return (...a) => { clearTimeout(to); to = setTimeout(() => fn(...a), ms); }; };
 export const when = fmtDate;

@@ -79,6 +79,12 @@ router.get('/driver/me', { perm: 'driver.use', needsPharmacy: false }, (ctx) => 
   const d = me(ctx); const { user_id, ...rest } = d;
   return { ...rest, rating: rating(d), pharmacy: get('SELECT id,name,lat,lng FROM pharmacies WHERE id=?', d.pharmacy_id), pharmacies: driverPharmacies(d), photo_url: photoUrl(d), has_id_doc: !!d.id_doc_file, id_doc_file: undefined, photo_file: undefined, active: all("SELECT id FROM deliveries WHERE driver_id=? AND status IN ('issued','received','in_progress')", d.id).length };
 });
+// « Mes tarifs » : les 4 modes de livraison réglés par l'administrateur de chaque pharmacie du chauffeur (lecture seule).
+router.get('/driver/tariffs', { perm: 'driver.use', needsPharmacy: false }, (ctx) => {
+  const d = me(ctx);
+  return driverPharmacies(d).map((p) => { const cfg = dlvConfig(p.id), ph = get('SELECT currency,currency_decimals decimals FROM pharmacies WHERE id=?', p.id) || {};
+    return { pharmacy_id: p.id, pharmacy: p.name, currency: ph.currency, decimals: ph.decimals, per_km: cfg.per_km, max_km: cfg.max_km, express_pct: cfg.express_pct, negotiation: cfg.negotiation, margin_pct: cfg.margin_pct, modes: modesView(cfg, 0) }; });
+});
 router.put('/driver/me', { perm: 'driver.use', needsPharmacy: false, ok200: true }, (ctx) => {
   const d = me(ctx), b = ctx.body, u = {};
   if (b.availability !== undefined) {

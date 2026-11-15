@@ -141,7 +141,7 @@ td.num,th.num{text-align:end;font-variant-numeric:tabular-nums}
 .b-ok{background:var(--ok-soft);color:var(--ok)}.b-warn{background:var(--warn-soft);color:var(--warn)}.b-bad{background:var(--danger-soft);color:var(--danger)}.b-info{background:var(--info-soft);color:var(--info)}
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px;overflow-x:auto;scrollbar-width:none;max-width:100%}.tabs::-webkit-scrollbar{display:none}
 .tabs button{background:none;border:0;padding:10px 14px;cursor:pointer;border-bottom:3px solid transparent;color:var(--muted);white-space:nowrap;font-weight:500;transition:color .15s,border-color .2s}
-.tabs button:hover{color:var(--ink)}.tabs button[aria-selected=true]{color:var(--brand);border-bottom-color:var(--brand);font-weight:700}
+.tabs button:hover{color:var(--ink)}.tabs button[aria-selected=true]{color:var(--brand);border-bottom-color:var(--brand);font-weight:700;background:linear-gradient(180deg,transparent,var(--brand-soft));border-radius:8px 8px 0 0;box-shadow:inset 0 -3px 0 var(--brand)}
 .seg{display:inline-flex;gap:2px;padding:3px;border-radius:calc(var(--r) - 2px);background:var(--bg2);max-width:100%;flex-wrap:wrap}
 .seg button{border:0;background:transparent;padding:6px 12px;border-radius:calc(var(--r) - 5px);cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:.85rem;transition:background .2s,box-shadow .2s}
 .seg button[aria-pressed=true]{background:var(--panel);box-shadow:var(--sh1);color:var(--brand);font-weight:700}
@@ -318,3 +318,11 @@ body.hide-history .history{display:none}
 body.nav-collapsed .nav a .nbadge{position:absolute;top:2px;inset-inline-end:2px;min-width:16px;height:16px;font-size:.62rem}
 tr.flash,.flash{animation:gpflash 1.2s ease 2}
 @keyframes gpflash{0%,100%{background:transparent}50%{background:var(--brand-soft,#d1fae5)}}
+
+/* Blocs repliables « passés » : triangle ▶ qui pivote à l'ouverture */
+details.past>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;padding:2px 0;user-select:none}
+details.past>summary::-webkit-details-marker{display:none}
+details.past>summary .tri{display:inline-block;font-size:.8em;color:var(--brand);transition:transform .2s}
+details.past[open]>summary .tri{transform:rotate(90deg)}
+.view-crumb{color:var(--muted);font-weight:500}
+.empty[hidden]{display:none!important}

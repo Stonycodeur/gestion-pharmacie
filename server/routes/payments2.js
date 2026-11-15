@@ -145,9 +145,9 @@ const inEur = (amount, dec, cur, R) => (R[cur] ? amount / 10 ** dec / R[cur] : 0
 function statRows(ctx) {
   const w = [], p = []; if (!isSuper(ctx)) { w.push('o.pharmacy_id=?'); p.push(ctx.ph); } else if (ctx.query.pharmacy_id) { w.push('o.pharmacy_id=?'); p.push(Number(ctx.query.pharmacy_id)); }
   if (ctx.query.from) { w.push('o.created_at>=?'); p.push(String(ctx.query.from)); } if (ctx.query.to) { w.push('o.created_at<?'); p.push(String(ctx.query.to) + ' 23:59:59'); }
-  return all(`SELECT o.id,o.created_at,o.pharmacy_id,ph.name pharmacy,COALESCE(c.name_fr,c.name_en,'—') country,o.method_code,COALESCE(m.label,o.method_code) method,o.status,o.amount,o.refunded,o.commission,COALESCE(o.currency,ph.currency) currency,ph.currency_decimals dec,o.ip,o.risk_score,o.provider_ref,cu.name customer,ord.number order_number
+  return all(`SELECT o.id,o.created_at,o.pharmacy_id,ph.name pharmacy,COALESCE(c.name_fr,c.name_en,'—') country,o.method_code,COALESCE(m.label,o.method_code) method,o.status,o.amount,o.refunded,o.commission,COALESCE(o.currency,ph.currency) currency,ph.currency_decimals cdec,o.ip,o.risk_score,o.provider_ref,cu.name customer,ord.number order_number
     FROM online_payments o JOIN pharmacies ph ON ph.id=o.pharmacy_id LEFT JOIN countries c ON c.id=ph.country_id LEFT JOIN payment_methods m ON m.code=o.method_code LEFT JOIN customers cu ON cu.id=o.customer_id LEFT JOIN customer_orders ord ON ord.id=o.order_id
-    ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY o.id DESC LIMIT 20000`, ...p);
+    ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY o.id DESC LIMIT 20000`, ...p).map((r) => ({ ...r, dec: r.cdec })); // « dec » est un mot réservé MariaDB : alias SQL cdec
 }
 router.get('/payments/stats', { needsPharmacy: false }, (ctx) => {
   if (!isSuper(ctx) && !(ctx.ph && (can(ctx.user, 'reports.view') || can(ctx.user, 'sales.deposit')))) throw forbidden('Permission requise');

@@ -1,7 +1,7 @@
 // Espace chauffeur : disponibilité, courses proposées (accepter au prix du tarif ou proposer le sien), « produit récupéré », GPS en direct,
 // messagerie / appel / note / signalement, photo de profil et pièce d'identité. Fonctionne en données mobiles, Wi-Fi et hors connexion (file d'attente).
 import { get, post, put, postQueued, state } from '../api.js';
-import { h, clear, fail, toast, badge, icon, money, formModal, modal, fromMinor, toMinor, historyToggle, when } from '../ui.js';
+import { h, clear, fail, toast, badge, icon, money, formModal, modal, fromMinor, toMinor, historyToggle, when, pastBlock } from '../ui.js';
 import { mapView, fmtM, stars, locate, filePicker, previewFile, directionsLink } from '../net.js';
 import { onEvent } from '../events.js';
 import { t } from '../i18n.js';
@@ -26,7 +26,7 @@ export default async function (box) {
     if (busy) return; busy = true;
     try {
       me = await get('/driver/me'); const [dl, of] = await Promise.all([get('/driver/deliveries'), get('/driver/offers').catch(() => ({ data: [] }))]); const hid = await get('/driver/offers?hidden=1').catch(() => ({ data: [] })); clear(root);
-      const [avl, avk] = AV[me.availability], gpsOn = watch != null;
+      const [avl, avk] = AV[me.availability], gpsOn = watch != null; const tariffsBox = await tariffs();
       root.append(h('div', { class: 'grid g2' },
         h('div', { class: 'card' }, h('div', { class: 'offer' }, h('button', { class: 'linklike', type: 'button', 'aria-label': 'Changer ma photo de profil', onclick: () => photoModal() }, avatar(me.photo_url, me.name, 64)), h('div', { style: { flex: 1 } }, h('h2', { style: { margin: 0 } }, me.name), h('div', { class: 'muted' }, `${me.vehicle_type} · ${me.plate || me.matricule}`), h('div', {}, stars(me.rating), me.rating_count ? h('small', { class: 'muted' }, ` (${me.rating_count} avis)`) : null)), badge(avl, avk)),
           !me.photo_url || !me.has_id_doc ? h('p', { class: 'muted' }, icon('info', { size: 14 }), ' Complétez votre profil : ', !me.photo_url ? 'photo de profil ' : '', !me.has_id_doc ? 'pièce d\'identité' : '') : null,
@@ -35,7 +35,7 @@ export default async function (box) {
           h('p', { class: 'muted' }, 'Gardez cette page ouverte pendant vos courses : la position est envoyée toutes les 5 secondes.'),
           h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => photoModal() }, icon('image', { size: 14 }), 'Photo de profil'), h('button', { class: 'btn sm', onclick: () => idModal() }, icon('file', { size: 14 }), me.has_id_doc ? 'Pièce d\'identité (remplacer)' : 'Déposer ma pièce d\'identité'), me.has_id_doc ? h('button', { class: 'btn sm', onclick: act(() => previewFile({ name: 'Pièce d\'identité', mime: 'image/jpeg' }, '/driver/me/id-doc')) }, 'Voir') : null)),
         h('div', { class: 'card' }, h('h2', {}, 'Mes tarifs'), h('p', { class: 'muted' }, 'Fixés par l\'administrateur. Vous pouvez proposer un autre prix pour une course précise (la pharmacie, son administrateur et les super-administrateurs en sont alertés).'),
-          h('div', {}, 'Frais de base : ', h('strong', {}, money(me.base_fee))), h('div', {}, 'Par kilomètre : ', h('strong', {}, money(me.per_km))), h('div', {}, 'Vitesse moyenne ', h('strong', {}, `${me.speed_kmh} km/h`), ` · attente ${me.wait_min} min`),
+          tariffsBox, h('div', { class: 'muted' }, 'Vitesse moyenne ', h('strong', {}, `${me.speed_kmh} km/h`), ` · attente ${me.wait_min} min`),
           h('h3', { style: { marginTop: '12px' } }, 'Mes pharmacies et lieux de départ'), ...(me.pharmacies?.length ? me.pharmacies.map((p) => h('div', { class: 'muted' }, icon('pin', { size: 14 }), ' ', h('strong', {}, p.name), p.depart_label ? ' — ' + p.depart_label : p.depart_lat != null ? ' — position enregistrée' : ' — position de la pharmacie')) : [h('div', { class: 'muted' }, me.pharmacy?.name || '')]),
           h('button', { class: 'btn', style: { marginTop: '10px' }, onclick: () => profileModal() }, icon('edit', { size: 14 }), 'Mon véhicule et mes coordonnées'), ' ', h('button', { class: 'btn', style: { marginTop: '10px' }, onclick: async () => (await import('../personalize.js')).personalize({ onLang: () => location.reload() }) }, icon('palette', { size: 14 }), 'Sonnerie, langue, apparence'))));
       // ----- courses proposées -----
@@ -46,10 +46,17 @@ export default async function (box) {
       if (hid.data.length) root.append(h('details', { style: { marginTop: '10px' } }, h('summary', {}, `Courses masquées (${hid.data.length})`), ...hid.data.map((o) => h('div', { class: 'card history', style: { marginTop: '8px' } }, h('div', { class: 'row between' }, h('span', {}, h('strong', {}, o.number), ' — ', o.address), h('strong', {}, fm(o.price, { currency: o.currency, decimals: o.decimals }))), h('button', { class: 'btn sm', style: { marginTop: '6px' }, onclick: act(async () => { await post(`/driver/offers/${o.id}/unhide`, {}); toast('Course de nouveau affichée'); draw(); }) }, icon('eye', { size: 14 }), 'Démasquer')))));
       const closed = (d) => ['delivered', 'failed', 'cancelled'].includes(d.status), act_ = dl.data.filter((d) => !closed(d)), past = dl.data.filter(closed);
       const sq = h('input', { type: 'search', placeholder: 'Rechercher une course (n°, adresse, client…)', 'aria-label': 'Rechercher une course', style: { maxWidth: '420px' } });
-      const list = h('div'), paintList = () => { const q = sq.value.trim().toLowerCase(), m = (d) => !q || JSON.stringify(d).toLowerCase().includes(q); clear(list).append(...(act_.filter(m).length ? act_.filter(m).map((d) => course(d, dl.pharmacy)) : [h('div', { class: 'empty' }, q ? 'Aucun résultat' : 'Aucune course en cours')]), ...(past.filter(m).length ? [h('h3', { style: { marginTop: '14px' } }, `Historique (${past.filter(m).length})`), ...past.filter(m).map((d) => h('div', { class: 'history' }, course(d, dl.pharmacy)))] : [])); };
-      sq.oninput = paintList; paintList(); root.append(h('h2', { style: { marginTop: '16px' } }, 'Mes courses'), h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap' } }, sq, historyToggle()), list);
+      const list = h('div'), paintList = () => { const q = sq.value.trim().toLowerCase(), m = (d) => !q || JSON.stringify(d).toLowerCase().includes(q); clear(list).append(...(act_.filter(m).length ? act_.filter(m).map((d) => course(d, dl.pharmacy)) : [h('div', { class: 'empty' }, q ? 'Aucun résultat' : 'Aucune course en cours')])); };
+      sq.oninput = paintList; paintList(); root.append(h('h2', { style: { marginTop: '16px' } }, 'Courses en cours'), h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap' } }, sq, historyToggle()), list, past.length ? pastBlock({ title: 'Courses passées', rows: past, statuses: { delivered: 'Livrée', failed: 'Échec', cancelled: 'Annulée' }, text: (d) => JSON.stringify(d), empty: 'Aucune course passée', render: (rows) => h('div', {}, rows.map((d) => course(d, dl.pharmacy))) }) : '');
     } catch (e) { clear(root).append(h('div', { class: 'empty' }, e.status === 0 ? 'Hors connexion : les dernières données sont affichées dès qu\'elles sont en cache. Vos actions seront envoyées au retour du réseau.' : e.message)); }
     finally { busy = false; }
+  };
+  // Mes tarifs = les 4 modes configurés par l'administrateur de chaque pharmacie (aucun tarif propre au chauffeur)
+  const tariffs = async () => {
+    const list = await get('/driver/tariffs').catch(() => []); if (!list.length) return h('div', { class: 'muted' }, 'Aucun tarif disponible pour le moment.');
+    return h('div', {}, ...list.map((p) => h('div', { style: { marginBottom: '10px' } }, list.length > 1 ? h('strong', {}, p.pharmacy) : '',
+      h('div', { class: 'tw' }, h('table', { class: 'rt' }, h('thead', {}, h('tr', {}, ['Mode', 'Frais de base', 'Délai estimé'].map((x) => h('th', {}, t(x))))), h('tbody', {}, p.modes.map((m) => h('tr', {}, h('td', { 'data-label': t('Mode') }, h('strong', {}, t(m.label)), m.mode === 'standard' ? ' ' : '', m.mode === 'standard' ? badge(t('Par défaut'), 'info') : ''), h('td', { 'data-label': t('Frais de base'), class: 'num' }, fm(m.price, p)), h('td', { 'data-label': t('Délai estimé') }, m.scheduled ? t('À l\'heure choisie') : `${m.eta_min}–${m.eta_max} min`)))))),
+      h('div', { class: 'muted' }, `${t('Par kilomètre')} : ${fm(p.per_km, p)} · ${t('Distance maximale')} : ${p.max_km} km`, p.express_pct ? ` · Express +${p.express_pct} %` : '', p.negotiation ? ` · ${t('Contre-proposition autorisée')} (±${p.margin_pct} %)` : ` · ${t('Contre-proposition désactivée')}`))));
   };
   const offer = (o) => {
     const mine = o.my_offer, c = h('div', { class: 'card', style: { marginBottom: '12px', borderLeft: '4px solid var(--accent, #0f766e)' } },

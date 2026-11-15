@@ -3,6 +3,7 @@ import { router, audit } from '../http.js';
 import { get, all, run, insert } from '../db.js';
 import { bad, conflict, notFound, str, int } from '../util.js';
 import { flagSrc } from '../phone.js';
+import { zonesOf, pickZone } from '../timezones.js';
 
 const view = (c) => ({ id: c.id, iso2: c.iso2, name_fr: c.name_fr, name_en: c.name_en, name_ar: c.name_ar, dial_code: c.dial_code, phone_min: c.phone_min, phone_max: c.phone_max, currencies: String(c.currencies || '').split(',').filter(Boolean), active: c.active, flag: flagSrc(c.iso2, c.flag_svg), custom_flag: !!c.flag_svg });
 // Un drapeau est une image inerte (affichée via <img>) : SVG assaini ou PNG/JPEG/WebP en data URI, taille bornée.
@@ -27,6 +28,8 @@ router.put('/countries/:id', { perm: 'pharmacies.manage', needsPharmacy: false, 
 router.delete('/countries/:id', { perm: 'pharmacies.manage', needsPharmacy: false, ok200: true }, (ctx) => { const c = get('SELECT * FROM countries WHERE id=?', ctx.params.id); if (!c) throw notFound('Pays'); if (get('SELECT 1 FROM pharmacies WHERE country_id=? LIMIT 1', c.id)) throw conflict('IN_USE', 'Des établissements utilisent ce pays : désactivez-le'); run('DELETE FROM countries WHERE id=?', c.id); audit(ctx, 'country.delete', 'country', c.id, { iso2: c.iso2 }); return { ok: true }; });
 
 // ---- Villes ----
+// Fuseaux horaires du pays (+ celui suggéré d'après la position de la pharmacie) : plus de saisie manuelle.
+router.get('/countries/:id/timezones', { public: true }, (ctx) => { const c = get('SELECT iso2 FROM countries WHERE id=?', ctx.params.id); if (!c) throw notFound('Pays'); const lat = ctx.query.lat === undefined || ctx.query.lat === '' ? null : Number(ctx.query.lat), lng = ctx.query.lng === undefined || ctx.query.lng === '' ? null : Number(ctx.query.lng); return { zones: zonesOf(c.iso2), suggested: pickZone(c.iso2, Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null) }; });
 router.get('/countries/:id/cities', { public: true }, (ctx) => all('SELECT id,name FROM cities WHERE country_id=? ORDER BY name', ctx.params.id));
 router.post('/countries/:id/cities', { perm: 'pharmacies.manage', needsPharmacy: false }, (ctx) => {
   if (!get('SELECT 1 FROM countries WHERE id=?', ctx.params.id)) throw notFound('Pays');

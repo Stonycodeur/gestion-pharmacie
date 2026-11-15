@@ -180,6 +180,7 @@ export function readyForDelivery(d, userId) {
 }
 router.get('/orders', { perm: 'orders.view' }, (ctx) => {
   const w = ['o.pharmacy_id=?'], p = [ctx.ph]; if (ctx.query.status) { w.push('o.status=?'); p.push(ctx.query.status); }
+  if (ctx.query.scope === 'current') w.push("o.status IN ('pending','confirmed','preparing','ready')"); else if (ctx.query.scope === 'past') w.push("o.status IN ('picked_up','cancelled','expired')"); // commandes actuelles / passées
   return paged(ctx, `SELECT COUNT(*) n FROM customer_orders o WHERE ${w.join(' AND ')}`, `SELECT o.*, c.name customer_name, (SELECT COUNT(*) FROM order_lines WHERE order_id=o.id) lines FROM customer_orders o JOIN customers c ON c.id=o.customer_id WHERE ${w.join(' AND ')} ORDER BY o.id DESC`, p);
 });
 router.get('/orders/:id', { perm: 'orders.view' }, (ctx) => {

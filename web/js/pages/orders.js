@@ -1,23 +1,29 @@
 import { get, post, can } from '../api.js';
-import { h, clear, money, toMinor, table, pager, badge, modal, formModal, fail, toast, when, statusBadge, confirmDialog, icon } from '../ui.js';
+import { h, clear, money, toMinor, table, pager, badge, modal, formModal, fail, toast, when, statusBadge, confirmDialog, icon, collapsible } from '../ui.js';
 import { loadMethods, methodsNow, methodOptions, kindOf, kindIcon } from '../paymethods.js';
 import { t } from '../i18n.js';
 import { productPicker } from './purchases.js';
 
 const NEXT = { pending: ['confirmed'], confirmed: ['preparing'], preparing: ['ready'] };
 export default async function (box) { await loadMethods('pos');
-  const list = h('div'); const st = h('select', {}, h('option', { value: '' }, 'Tous statuts'), ['pending', 'confirmed', 'preparing', 'ready', 'picked_up', 'cancelled', 'expired'].map((s) => h('option', { value: s }, s)));
-  async function load(page = 1) { const r = await get(`/orders?page=${page}&status=${st.value}`); clear(list).append(table([{ label: 'N°', key: 'number' }, { label: 'Client', key: 'customer_name' }, { label: 'Type', key: 'kind' }, { label: 'Lignes', num: true, key: 'lines' }, { label: 'Expire', render: (o) => when(o.expires_at) }, { label: 'Statut', render: (o) => statusBadge('order', o.status) }], r.data, { onRow: open }), pager(r, load)); }
+  const list = h('div'), pastBox = h('div'); const PAST = ['picked_up', 'cancelled', 'expired'];
+  const st = h('select', { 'aria-label': t('Statut') }, h('option', { value: '' }, t('Tous les statuts passés')), PAST.map((s) => h('option', { value: s }, t(({ picked_up: 'Retirée', cancelled: 'Annulée', expired: 'Expirée' })[s]))));
+  const cols = [{ label: 'N°', key: 'number' }, { label: 'Client', key: 'customer_name' }, { label: 'Type', key: 'kind' }, { label: 'Lignes', num: true, key: 'lines' }, { label: 'Expire', render: (o) => when(o.expires_at) }, { label: 'Statut', render: (o) => statusBadge('order', o.status) }];
+  async function load(page = 1) { const r = await get(`/orders?page=${page}&scope=current`); clear(list).append(h('h2', {}, t('Commandes actuelles')), r.data.length ? table(cols, r.data, { onRow: open }) : h('div', { class: 'empty card' }, t('Aucune commande en cours')), pager(r, load)); }
+  // Commandes passées : bloc repliable (▶), chargé à l'ouverture, avec filtre de statut
+  const past = collapsible('Commandes passées', { onOpen: (b) => loadPast(1) }), pastList = h('div'); past.body.append(h('div', { class: 'row', style: { margin: '10px 0' } }, st), pastList); pastBox.append(past.el);
+  async function loadPast(page = 1) { const r = await get(`/orders?page=${page}&scope=past${st.value ? '&status=' + st.value : ''}`); clear(pastList).append(r.data.length ? table(cols, r.data, { onRow: open }) : h('div', { class: 'empty' }, t('Aucune commande passée')), pager(r, loadPast)); }
+  st.onchange = () => loadPast(1).catch(fail);
   function deposit(o, dep) {
     formModal('Acompte — ' + o.number, [{ name: 'amount', label: 'Montant', type: 'money', required: true, hint: `Déjà versé : ${money(dep.held)} · valeur de la commande : ${money(dep.order_value)}` }, { name: 'method', label: 'Mode', type: 'select', required: true, value: 'cash', options: methodOptions() }], async (v) => { await post(`/orders/${o.id}/deposit`, v); toast('Acompte encaissé'); load(); });
   }
   async function open(row) {
     const o = await get('/orders/' + row.id); const acts = []; const dep = can('orders.view') ? await get(`/orders/${o.id}/deposits`).catch(() => ({ held: 0, data: [], order_value: 0 })) : { held: 0, data: [] };
     if (can('orders.manage')) {
-      (NEXT[o.status] || []).forEach((n) => acts.push(h('button', { class: 'btn' + (n === 'ready' ? ' primary' : ''), onclick: async () => { await post(`/orders/${o.id}/status`, { status: n }); m.close(); load(); } }, [icon(n === 'ready' && o.delivery_id ? 'truck' : 'arrow', { size: 14 }), t(({ confirmed: 'Confirmée', preparing: 'En préparation', ready: o.delivery_id ? 'Prêt pour la livraison' : 'Prêt' })[n])])));
+      (NEXT[o.status] || []).forEach((n) => acts.push(h('button', { class: 'btn' + (n === 'ready' ? ' primary' : ''), onclick: async () => { await post(`/orders/${o.id}/status`, { status: n }); m.close(); load(); if (past.el.open) loadPast(1); } }, [icon(n === 'ready' && o.delivery_id ? 'truck' : 'arrow', { size: 14 }), t(({ confirmed: 'Confirmée', preparing: 'En préparation', ready: o.delivery_id ? 'Prêt pour la livraison' : 'Prêt' })[n])])));
       if (o.delivery_id && o.status === 'ready') acts.push(h('span', { class: 'badge b-info' }, t('Prête pour la livraison')));
       if (!o.delivery_id && o.status === 'ready') acts.push(h('span', { class: 'badge b-ok' }, t('Prête')));
-      if (['pending', 'confirmed', 'preparing', 'ready'].includes(o.status)) { acts.push(h('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Annuler et libérer le stock réservé ?', { danger: true })) { await post(`/orders/${o.id}/status`, { status: 'cancelled' }); m.close(); load(); } } }, t('Annuler')));
+      if (['pending', 'confirmed', 'preparing', 'ready'].includes(o.status)) { acts.push(h('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Annuler et libérer le stock réservé ?', { danger: true })) { await post(`/orders/${o.id}/status`, { status: 'cancelled' }); m.close(); load(); if (past.el.open) loadPast(1); } } }, t('Annuler')));
         if (can('sales.deposit')) acts.push(h('button', { class: 'btn', onclick: () => { m.close(); deposit(o, dep); } }, '+ Acompte'));
         if (can('sales.deposit') && dep.held > 0) acts.push(h('button', { class: 'btn', onclick: async () => { const r = await confirmDialog(`Rembourser ${money(dep.held)} d'acompte ?`, { reason: true }); if (r) { try { await post(`/orders/${o.id}/deposit/refund`, { reason: r }); m.close(); toast('Acompte remboursé'); } catch (e) { fail(e); } } } }, 'Rembourser l\'acompte'));
         if (can('sales.create')) acts.push(h('button', { class: 'btn primary', onclick: () => { m.close(); pickup(o); } }, 'Retrait + encaissement')); }
@@ -35,8 +41,7 @@ export default async function (box) { await loadMethods('pos');
     const draw = () => clear(tb).append(table([{ label: 'Produit', key: 'name' }, { label: 'Qté', render: (l) => h('input', { type: 'number', min: 1, value: l.qty, style: { width: '70px' }, onchange: (e) => (l.qty = Number(e.target.value)) }) }], lines));
     const m = modal('Nouvelle commande / réservation', h('div', {}, h('label', { class: 'f' }, 'Client', cs), h('label', { class: 'f' }, 'Type', kind), tb, h('button', { class: 'btn', onclick: () => productPicker((p) => { lines.push({ id: p.id, name: p.name, qty: 1 }); draw(); }) }, '+ Produit'), h('p', { class: 'muted' }, 'Le stock est réservé immédiatement (FEFO) et libéré automatiquement à l\'expiration.')), { wide: true, actions: [h('button', { class: 'btn primary', onclick: async () => { try { await post('/orders', { customer_id: Number(cs.value), kind: kind.value, lines: lines.map((l) => ({ product_id: l.id, qty: l.qty })) }); m.close(); toast('Créée'); load(); } catch (e) { fail(e); } } }, 'Créer')] });
   }
-  st.onchange = () => load();
-  box.append(h('div', { class: 'row between' }, h('h1', {}, t('Commandes')), can('orders.manage') ? h('button', { class: 'btn primary', onclick: create }, '+ ' + t('Nouveau')) : null), h('div', { style: { margin: '12px 0' } }, st), list); await load();
+  box.append(h('div', { class: 'row between' }, h('h1', {}, t('Commandes')), can('orders.manage') ? h('button', { class: 'btn primary', onclick: create }, '+ ' + t('Nouveau')) : null), list, pastBox); await load();
   if (can('orders.view')) box.append(await (await import('./payments_admin.js')).onlinePayments());
   if (can('orders.view') || can('sales.deposit')) { const P2 = await import('./payments2.js'); await P2.receiptsList(box, { staff: true }); if (can('reports.view') || can('sales.deposit')) box.append(await P2.dashboard()); }
 }

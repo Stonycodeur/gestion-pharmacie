@@ -242,6 +242,8 @@ async function render() {
   } catch (e) { if (token !== current) return; clear(box).append(h('div', { class: 'alert bad' }, icon('alert', { size: 18 }), h('span', {}, e.status === 0 ? 'Cette page n\'a pas encore été consultée sur cet appareil : elle n\'est pas disponible hors connexion.' : e.message || String(e)))); if (e.status !== 0) console.error(e); }
 }
 window.addEventListener('hashchange', () => state.token && render());
+// Vue courante (onglet actif d'une page) : « Mon espace · Mes commandes » dans l'en-tête et le titre de l'onglet du navigateur.
+window.addEventListener('gp:view', (e) => { const id = (location.hash.replace(/^#\//, '') || 'dashboard').split('?')[0], nm = NAV.find(([n]) => n === id)?.[1] || EXTRA[id] || ''; if (!nm) return; if (titleEl) { titleEl.textContent = ''; titleEl.append(t(nm), ' ', Object.assign(document.createElement('span'), { className: 'view-crumb', textContent: '› ' + e.detail })); } document.title = e.detail + ' · ' + t(nm) + ' · ' + appName(); });
 
 window.addEventListener('gp:impersonate', async (e) => { location.hash = ''; try { await boot(e.detail); } catch (er) { fail(er); } });
 // ---------- init ----------

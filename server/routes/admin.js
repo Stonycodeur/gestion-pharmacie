@@ -8,6 +8,7 @@ import { ROLES, PERMISSIONS, assignableRoles, reloadPerms } from '../rbac.js';
 const ROLE_ORDER = (c) => { const i = Object.keys(ROLES).indexOf(c); return i < 0 ? 999 : i; };
 import { refreshNotifications } from '../alerts.js';
 import { sendWelcome } from '../emailtpl.js';
+import { resolveZone } from '../timezones.js';
 
 // ---------- utilisateurs ----------
 const scope = (ctx) => (ctx.user.role === 'super_admin' ? { w: '1=1', p: [] } : { w: 'u.pharmacy_id=?', p: [ctx.ph] });
@@ -137,7 +138,7 @@ const phInput = (b) => {
   const cid = b.country_id ? int(b.country_id, 'pays', { min: 1 }) : get("SELECT id FROM countries WHERE iso2='TN'")?.id; const c = get('SELECT * FROM countries WHERE id=? AND active=1', cid); if (!c) throw bad('VALIDATION', 'Pays inconnu ou désactivé');
   return { name: str(b.name, 'nom', { required: true, max: 160 }), address: str(b.address, 'adresse', { max: 300 }), city: str(b.city, 'ville', { max: 80 }), country_id: c.id, phone: normalizePhone(b.phone, c.dial_code), email: str(b.email, 'e-mail', { max: 160 }),
     lat: num(b.lat, 'latitude', -90, 90), lng: num(b.lng, 'longitude', -180, 180), opening_hours: str(b.opening_hours, 'horaires', { max: 300 }), public_listed: b.public_listed === undefined ? 1 : b.public_listed ? 1 : 0,
-    ...curInput(b, c), currency_decimals: int(b.currency_decimals ?? 3, 'décimales', { min: 0, max: 4 }), timezone: str(b.timezone || 'Africa/Tunis', 'fuseau', { max: 60 }), invoice_prefix: str(b.invoice_prefix || 'F', 'préfixe', { max: 8 }), legal_notice: str(b.legal_notice, 'mentions légales', { max: 600 }) };
+    ...curInput(b, c), currency_decimals: int(b.currency_decimals ?? 3, 'décimales', { min: 0, max: 4 }), timezone: resolveZone(c.iso2, num(b.lat, 'latitude', -90, 90), num(b.lng, 'longitude', -180, 180), b.timezone), invoice_prefix: str(b.invoice_prefix || 'F', 'préfixe', { max: 8 }), legal_notice: str(b.legal_notice, 'mentions légales', { max: 600 }) };
 };
 const phView = (p) => ({ ...p, country: p.country_id ? get('SELECT iso2,name_fr,dial_code FROM countries WHERE id=?', p.country_id) : null, manager: p.manager_user_id ? get('SELECT id,name,email FROM users WHERE id=?', p.manager_user_id) : null, has_logo: !!p.logo_path, logo_url: p.logo_path ? '/api/v1/public/file/' + p.logo_path : null });
 router.get('/pharmacies', { perm: 'settings.manage', needsPharmacy: false }, (ctx) => (ctx.user.role === 'super_admin' ? all('SELECT * FROM pharmacies ORDER BY id') : all('SELECT * FROM pharmacies WHERE id=?', ctx.ph)).map(phView));
