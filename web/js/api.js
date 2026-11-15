@@ -15,13 +15,20 @@ async function raw(method, path, body, opts = {}) {
   catch (e) { setOnline(false); throw new ApiError(0, { error: { code: 'OFFLINE', message: 'Hors connexion' } }); }
 }
 const CACHEABLE = (p) => !/^\/(auth|events|notifications)/.test(p) && !/\.(pdf|csv|xlsx)/.test(p) && !p.includes('format=');
-export function setSession(d) { state.impersonating = !!d.impersonating; setScope(d.user?.id); state.token = d.access_token; state.user = d.user; state.perms = new Set(d.permissions || []); }
+// Jeton toujours frais : renouvelé AVANT son expiration (minuterie + retour d'onglet/réseau + vérification avant chaque requête),
+// pour qu'aucune requête ne parte avec un jeton expiré (plus de 401 dans la console, flux temps réel jamais coupé).
+const jwtExp = (t) => { try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp * 1000; } catch { return 0; } };
+let renewTimer = null;
+function scheduleRenew() { clearTimeout(renewTimer); if (!state.token) return; const exp = jwtExp(state.token); if (!exp) return; renewTimer = setTimeout(() => ensureFresh(true).catch(() => {}), Math.max(5000, exp - Date.now() - 90000)); }
+export async function ensureFresh(force = false) { if (!state.token) return; const exp = jwtExp(state.token); if (force || (exp && exp - Date.now() < 45000)) await refresh(); }
+export function setSession(d) { state.impersonating = !!d.impersonating; setScope(d.user?.id); state.token = d.access_token; state.user = d.user; state.perms = new Set(d.permissions || []); scheduleRenew(); }
+for (const ev of ['visibilitychange', 'online', 'focus']) addEventListener(ev, () => { if (document.visibilityState !== 'hidden') ensureFresh().catch(() => {}); });
 export async function refresh() {
   refreshing ||= (async () => { const r = await raw('POST', '/auth/refresh', {}, { noAuth: true }); if (!r.ok) throw new ApiError(r.status, await r.json().catch(() => null)); const d = await r.json(); setSession(d); return d; })().finally(() => { refreshing = null; });
   return refreshing;
 }
 export async function api(method, path, body) {
-  let r;
+  let r; if (state.token && !/^\/auth\//.test(path)) await ensureFresh().catch(() => {}); // jamais de requête avec un jeton expiré
   try { r = await raw(method, path, body); }
   catch (e) { if (e.status === 0 && method === 'GET' && CACHEABLE(path)) { const c = await cacheGet(path); if (c) { const d = c.data; if (d && typeof d === 'object') try { Object.defineProperty(d, '__cachedAt', { value: c.at, enumerable: false }); } catch {} return d; } } throw e; }
   if (r.status === 401 && state.token) { try { await refresh(); r = await raw(method, path, body); } catch { state.token = null; location.hash = '#/login'; location.reload(); throw new ApiError(401, null); } }
@@ -46,7 +53,9 @@ export async function blobUrl(path) { const r = await raw('GET', path); if (!r.o
 export async function listen(onEvent, signal) {
   for (;;) {
     try {
-      const r = await raw('GET', '/events'); if (!r.ok || !r.body) throw new Error('sse');
+      await ensureFresh().catch(() => {}); let r = await raw('GET', '/events');
+      if (r.status === 401) { await refresh(); r = await raw('GET', '/events'); } // jeton expiré : on le renouvelle et on se reconnecte tout de suite
+      if (!r.ok || !r.body) throw new Error('sse');
       const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
       for (;;) {
         const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });

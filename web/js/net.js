@@ -95,6 +95,7 @@ function playCustom(volume) {
 export function playSound(id = 'aurora', volume = 0.6) {
   if (id === 'custom') { if (playCustom(volume)) return; id = 'aurora'; }
   const s = SOUNDS[id] || SOUNDS.aurora; if (!s.notes.length) return;
+  if (!ctxA && navigator.userActivation && !navigator.userActivation.hasBeenActive) return; // pas encore de geste de l'utilisateur : silence (le navigateur interdit le son, sans erreur)
   try {
     ctxA ||= new (window.AudioContext || window.webkitAudioContext)(); if (ctxA.state === 'suspended') ctxA.resume();
     const t0 = ctxA.currentTime;
@@ -110,7 +111,8 @@ export const soundPrefs = () => { try { return { sound: 'aurora', volume: 0.6, m
 export const setSoundPrefs = (p) => { try { localStorage.setItem(KEY(), JSON.stringify({ ...soundPrefs(), ...p })); } catch {} };
 export const notifyBeep = () => { const p = soundPrefs(); if (!p.muted) playSound(p.sound, p.volume); };
 // débloque l'audio au premier geste (politique des navigateurs)
-addEventListener('pointerdown', () => { try { ctxA ||= new (window.AudioContext || window.webkitAudioContext)(); ctxA.resume(); } catch {} }, { once: true });
+// (seuls clic, touche et fin de toucher comptent comme « geste » pour l'audio ; pointerdown déclenchait l'avertissement)
+for (const ev of ['click', 'keydown', 'touchend']) addEventListener(ev, () => { try { ctxA ||= new (window.AudioContext || window.webkitAudioContext)(); if (ctxA.state === 'suspended') ctxA.resume(); } catch {} }, { once: true });
 
 // ---------- géolocalisation ----------
 export function locate({ timeout = 10000 } = {}) {
