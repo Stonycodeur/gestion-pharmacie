@@ -130,14 +130,28 @@ export function collapsible(title, { count, onOpen, open = false } = {}) {
   const body = h('div', { class: 'past-body' }), el = h('details', { class: 'past history card' }, sum, body); if (open) el.open = true;
   el.addEventListener('toggle', () => { if (el.open && onOpen) onOpen(body); }); return { el, body };
 }
-// Éléments passés d'une liste déjà chargée : recherche + date + statut. render(rows) renvoie un nœud (ou une promesse).
-export function pastBlock({ title, rows, statuses = {}, text = (r) => JSON.stringify(r), day = (r) => String(r.updated_at || r.created_at || '').slice(0, 10), stat = (r) => r.status, render, empty = 'Aucun élément passé' }) {
-  const q = h('input', { type: 'search', class: 'sr-search', placeholder: t('Rechercher…'), 'aria-label': t('Rechercher') }), from = h('input', { type: 'date', 'aria-label': t('Du') }), to = h('input', { type: 'date', 'aria-label': t('Au') });
-  const st = h('select', { 'aria-label': t('Statut') }, h('option', { value: '' }, t('Tous les statuts')), Object.entries(statuses).map(([k, l]) => h('option', { value: k }, t(l)))), out = h('div');
-  const draw = async () => { const k = q.value.trim().toLowerCase(); const list = rows.filter((r) => (!k || text(r).toLowerCase().includes(k)) && (!from.value || day(r) >= from.value) && (!to.value || day(r) <= to.value) && (!st.value || stat(r) === st.value)); const node = list.length ? await render(list) : h('div', { class: 'empty' }, t(empty)); clear(out).append(node); };
+// Éléments passés d'une liste déjà chargée : recherche large (tous les champs), dates, statut, filtres à facettes
+// (select auto-alimenté ou montants min/max) et tri. render(rows) renvoie un nœud (ou une promesse).
+// filters : [{ label, get: (r) => valeur, labels?: {valeur: libellé} }]  → liste déroulante des valeurs distinctes
+//           [{ label, num: 'min'|'max', get: (r) => nombre }]            → champ numérique (≥ / ≤)
+export function pastBlock({ title, rows, statuses = {}, text = (r) => JSON.stringify(r), day = (r) => String(r.updated_at || r.created_at || '').slice(0, 10), stat = (r) => r.status, filters = [], sorts, render, empty = 'Aucun élément passé' }) {
+  const mk = (tag, p) => h(tag, { ...p, 'aria-label': t(p.label || p.placeholder || '') });
+  const q = mk('input', { type: 'search', class: 'sr-search', placeholder: t('Rechercher (n°, produit, pharmacie, montant, date…)') }), from = mk('input', { type: 'date', label: 'Du' }), to = mk('input', { type: 'date', label: 'Au' });
+  const st = mk('select', { label: 'Statut' }); st.append(h('option', { value: '' }, t('Tous les statuts')), ...Object.entries(statuses).map(([k, l]) => h('option', { value: k }, t(l))));
+  const fx = filters.map((f) => { if (f.num) return { f, el: mk('input', { type: 'number', min: 0, step: 'any', placeholder: t(f.label), label: f.label, style: { maxWidth: '150px' } }) };
+    const vals = [...new Set(rows.map(f.get).filter((v) => v != null && v !== ''))]; const el = mk('select', { label: f.label }); el.append(h('option', { value: '' }, t(f.label)), ...vals.map((v) => h('option', { value: String(v) }, t((f.labels || {})[v] || String(v))))); return { f, el, hide: vals.length < 2 }; });
+  const SORTS = sorts || [['recent', 'Plus récentes', (a, b) => String(day(b)).localeCompare(String(day(a)))], ['old', 'Plus anciennes', (a, b) => String(day(a)).localeCompare(String(day(b)))]];
+  const so = mk('select', { label: 'Trier' }); so.append(...SORTS.map(([k, l]) => h('option', { value: k }, t(l))));
+  const out = h('div'), count = h('small', { class: 'muted' });
+  const draw = async () => { const k = q.value.trim().toLowerCase();
+    const list = rows.filter((r) => (!k || text(r).toLowerCase().includes(k)) && (!from.value || day(r) >= from.value) && (!to.value || day(r) <= to.value) && (!st.value || stat(r) === st.value)
+      && fx.every(({ f, el }) => !el.value || (f.num ? (f.num === 'min' ? Number(f.get(r)) >= Number(el.value) : Number(f.get(r)) <= Number(el.value)) : String(f.get(r)) === el.value))).sort(SORTS.find((x) => x[0] === so.value)[2]);
+    count.textContent = `${list.length} / ${rows.length}`; const node = list.length ? await render(list) : h('div', { class: 'empty' }, t('Aucun résultat : modifiez ou réinitialisez les filtres')); clear(out).append(node); };
   const c = collapsible(title, { count: rows.length, onOpen: () => draw().catch(() => {}) });
-  for (const el of [q, from, to, st]) { el.addEventListener('input', () => draw().catch(() => {})); el.addEventListener('change', () => draw().catch(() => {})); }
-  c.body.append(h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '8px', margin: '10px 0' } }, q, from, to, Object.keys(statuses).length ? st : ''), out); return c.el;
+  const all = [q, from, to, ...(Object.keys(statuses).length ? [st] : []), ...fx.filter((x) => !x.hide).map((x) => x.el), so];
+  for (const el of all) { el.addEventListener('input', () => draw().catch(() => {})); el.addEventListener('change', () => draw().catch(() => {})); }
+  const reset = h('button', { type: 'button', class: 'btn sm', onclick: () => { for (const el of [q, from, to, st, ...fx.map((x) => x.el)]) el.value = ''; so.value = SORTS[0][0]; draw().catch(() => {}); } }, t('Réinitialiser'));
+  c.body.append(h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '8px', margin: '10px 0', alignItems: 'center' } }, ...all, reset, count), out); return c.el;
 }
 export const debounce = (fn, ms = 250) => { let to; return (...a) => { clearTimeout(to); to = setTimeout(() => fn(...a), ms); }; };
 export const when = fmtDate;

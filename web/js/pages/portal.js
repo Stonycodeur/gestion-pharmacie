@@ -2,6 +2,7 @@ import { get, post, put } from '../api.js';
 import { h, clear, money, table, badge, fail, toast, when, statusBadge, tabs, debounce, fileToBase64, modal, icon } from '../ui.js';
 import { t } from '../i18n.js';
 import { onEvent } from '../events.js';
+import { soft } from '../silent.js';
 import * as X from './portal_extra.js';
 import { state, can } from '../api.js';
 import discover, { chosenPharmacy, choosePharmacy } from './discover.js';
@@ -13,7 +14,7 @@ export default async function (box) {
   const paintBar = () => { const c = chosenPharmacy(); clear(bar).append(...(guest ? [h('div', { class: 'alert info', style: { marginBottom: '10px' } }, icon('user', { size: 16 }), h('span', {}, ' Mode invité : pas d\'historique ni de privilèges (fidélité, ordonnances, rendez-vous). '), h('button', { class: 'btn sm', onclick: async () => { try { await post('/auth/logout', {}); } catch {} location.hash = ''; location.reload(); } }, 'Créer un compte'))] : []),
     h('div', { class: 'row between card', style: { padding: '8px 12px', marginBottom: '10px' } }, h('span', {}, icon('pin', { size: 16 }), ' Pharmacie : ', h('strong', {}, c?.name || state.pharmacy?.name || 'aucune choisie')), h('button', { class: 'btn sm', onclick: () => show('discover') }, 'Changer / trouver la plus proche'))); };
   const TABS = [['home', 'Accueil'], ['discover', 'Pharmacies'], ['catalog', 'Catalogue'], ['orders', 'Mes commandes'], ['receipts', 'Mes reçus'], ['subscriptions', 'Abonnements'], ['deliveries', 'Livraisons'], ...(guest ? [] : [['rx', 'Mes ordonnances'], ['appts', 'Rendez-vous'], ['help', 'Aide']]), ['custom', 'Personnaliser']];
-  const show = (id) => { tab = id; paintBar(); clear(head).append(tabs(TABS, tab, show)); clear(body); views[tab]().catch(fail); };
+  const show = (id) => { tab = id; paintBar(); clear(head).append(tabs(TABS, tab, show)); clear(body); return views[tab]().catch(fail); };
   const views = {
     async catalog() {
       const q = h('input', { type: 'search', placeholder: t('Rechercher'), 'aria-label': t('Rechercher') }), list = h('div'), cartBox = h('div'); const note = h('textarea', { rows: 2, maxLength: 500, placeholder: 'Message pour la pharmacie (heure de passage, précision…) — modifiable ensuite dans « Mes commandes »' });
@@ -33,5 +34,5 @@ export default async function (box) {
         h('button', { class: 'btn primary', style: { marginTop: '8px' }, onclick: async () => { if (!pick.file) return toast('Choisissez un fichier', true); try { const r = await post('/portal/prescriptions', { subject: subj.value || undefined, notes: msg.value || undefined, file: await pick.payload() }); toast(`Ordonnance ${r.number} déposée`); subj.value = ''; msg.value = ''; show('rx'); } catch (e) { fail(e); } } }, 'Envoyer')), list); await load();
     },
   };
-  box.append(h('h1', {}, t('Mon espace')), head, body); const q = new URLSearchParams((location.hash.split('?')[1] || '')); if (q.get('paid')) toast(t('Paiement en cours de confirmation par la banque — le statut se met à jour automatiquement')); if (q.get('cancelled')) toast(t('Paiement annulé'), true); show(q.get('tab') && TABS.some((x) => x[0] === q.get('tab')) ? q.get('tab') : q.get('paid') || q.get('cancelled') ? 'orders' : (guest && !chosenPharmacy() ? 'discover' : 'home')); onEvent('order', (d) => { if (d.payment === 'paid') toast(t('Paiement confirmé'));  if (tab === 'orders') show('orders'); }, box);
+  box.append(h('h1', {}, t('Mon espace')), head, body); const q = new URLSearchParams((location.hash.split('?')[1] || '')); if (q.get('paid')) toast(t('Paiement en cours de confirmation par la banque — le statut se met à jour automatiquement')); if (q.get('cancelled')) toast(t('Paiement annulé'), true); show(q.get('tab') && TABS.some((x) => x[0] === q.get('tab')) ? q.get('tab') : q.get('paid') || q.get('cancelled') ? 'orders' : (guest && !chosenPharmacy() ? 'discover' : 'home')); onEvent('order', (d) => { if (d.payment === 'paid') toast(t('Paiement confirmé'));  if (tab === 'orders') soft(body, () => show('orders')); }, box);
 }

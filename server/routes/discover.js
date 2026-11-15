@@ -74,3 +74,23 @@ router.get('/portal/orders/:id/history', { anyPerm: ['portal.use', 'portal.guest
   const o = get(`SELECT id FROM customer_orders WHERE id=? AND customer_id IN ${OWN}`, ctx.params.id, ctx.user.id); if (!o) throw notFound('Réservation');
   return all("SELECT created_at, new_json FROM audit_logs WHERE entity='order' AND entity_id=? AND action='order.message' ORDER BY id", String(o.id)).map((r) => ({ at: r.created_at, notes: JSON.parse(r.new_json || '{}').notes }));
 });
+
+// Historique COMPLET d'une commande : statuts, messages, paiements, livraison (course et étapes), du plus ancien au plus récent.
+const OST = { pending: 'En attente', confirmed: 'Confirmée', preparing: 'En préparation', ready: 'Prête', picked_up: 'Retirée', cancelled: 'Annulée', expired: 'Expirée' };
+const DST = { issued: 'Livraison demandée', received: 'Course prise en charge', in_progress: 'Livraison en cours', delivered: 'Livrée', failed: 'Livraison échouée', cancelled: 'Livraison annulée' };
+const PST = { pending: 'en attente', awaiting_manual: 'en attente de confirmation', paid: 'réussi', failed: 'échoué', cancelled: 'annulé', refunded: 'remboursé', expired: 'expiré' };
+router.get('/portal/orders/:id/timeline', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => {
+  const o = get(`SELECT o.id,o.number,o.created_at,o.pharmacy_id,p.currency,p.currency_decimals decimals,p.name pharmacy FROM customer_orders o JOIN pharmacies p ON p.id=o.pharmacy_id WHERE o.id=? AND o.customer_id IN ${OWN}`, ctx.params.id, ctx.user.id); if (!o) throw notFound('Commande');
+  const ev = [];
+  for (const r of all('SELECT from_status,to_status,created_at FROM order_status_history WHERE order_id=? ORDER BY id', o.id)) ev.push({ at: r.created_at, kind: 'status', title: r.from_status ? `Commande ${OST[r.to_status] || r.to_status}`.toLowerCase().replace(/^./, (c) => c.toUpperCase()) : 'Commande envoyée à la pharmacie', tone: r.to_status === 'cancelled' || r.to_status === 'expired' ? 'bad' : ['picked_up', 'ready'].includes(r.to_status) ? 'ok' : 'info' });
+  if (!ev.length) ev.push({ at: o.created_at, kind: 'status', title: 'Commande envoyée à la pharmacie', tone: 'info' });
+  for (const r of all("SELECT created_at, new_json FROM audit_logs WHERE entity='order' AND entity_id=? AND action='order.message' ORDER BY id", String(o.id))) ev.push({ at: r.created_at, kind: 'message', title: 'Message à la pharmacie', detail: JSON.parse(r.new_json || '{}').notes || '(message supprimé)', tone: '' });
+  for (const r of all('SELECT amount,status,created_at FROM order_deposits WHERE order_id=? ORDER BY id', o.id)) ev.push({ at: r.created_at, kind: 'payment', title: r.status === 'refunded' ? 'Acompte remboursé' : 'Paiement enregistré', amount: r.amount, tone: r.status === 'refunded' ? 'warn' : 'ok' });
+  for (const r of all('SELECT method_code,amount,status,created_at FROM online_payments WHERE order_id=? ORDER BY id', o.id)) if (r.status !== 'paid') ev.push({ at: r.created_at, kind: 'payment', title: `Paiement en ligne (${r.method_code}) ${PST[r.status] || r.status}`, amount: r.amount, tone: ['failed', 'cancelled', 'expired'].includes(r.status) ? 'bad' : 'warn' });
+  for (const d of all('SELECT id,number,mode,fee,created_at FROM deliveries WHERE order_id=? ORDER BY id', o.id)) {
+    ev.push({ at: d.created_at, kind: 'delivery', title: `Livraison ${d.number} demandée`, detail: d.mode, amount: d.fee, tone: 'info' });
+    for (const e of all('SELECT status,note,driver_name,created_at FROM delivery_events WHERE delivery_id=? ORDER BY id', d.id)) ev.push({ at: e.created_at, kind: 'delivery', title: DST[e.status] || e.status, detail: [e.driver_name && `Chauffeur : ${e.driver_name}`, e.note].filter(Boolean).join(' — ') || null, tone: e.status === 'delivered' ? 'ok' : ['failed', 'cancelled'].includes(e.status) ? 'bad' : 'info' });
+  }
+  ev.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  return { number: o.number, pharmacy: o.pharmacy, currency: o.currency, decimals: o.decimals, events: ev };
+});

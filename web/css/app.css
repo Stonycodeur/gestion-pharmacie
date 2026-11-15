@@ -345,3 +345,11 @@ h2+.tw,h2+.card{margin-top:8px}
 img.cutout,canvas.cutout{border-radius:0!important;background:transparent!important;border:0!important;box-shadow:none!important;object-fit:contain!important;object-position:50% 100%!important}
 .avatar:has(img.cutout),.avatar-lg:has(img.cutout),button.avatar:has(img.cutout){background:transparent!important;border:0!important;box-shadow:none!important;border-radius:0!important}
 .avatar-img.cutout{width:100%;height:100%}
+
+/* Chronologie d'une commande */
+.otl{position:relative;display:grid;gap:0;padding-inline-start:4px}
+.otl-item{position:relative;display:flex;gap:12px;padding:0 0 16px 0}
+.otl-item::before{content:"";position:absolute;inset-inline-start:13px;top:28px;bottom:0;width:2px;background:var(--line)}
+.otl-item:last-child::before{display:none}
+.otl-dot{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--bg2);color:var(--brand);border:2px solid var(--brand)}
+.otl-ok .otl-dot{color:var(--ok,#16a34a);border-color:var(--ok,#16a34a)}.otl-bad .otl-dot{color:var(--bad,#dc2626);border-color:var(--bad,#dc2626)}.otl-warn .otl-dot{color:var(--warn,#d97706);border-color:var(--warn,#d97706)}

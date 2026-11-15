@@ -85,3 +85,17 @@ test('livraison déjà demandée : plus de question « livré ? », total = comm
   run("UPDATE deliveries SET status='cancelled' WHERE id=?", d.body.id);
   const z = (await call('GET', `/portal/orders/${o.id}/payment-options`, null, o.t)).body; assert.equal(z.has_delivery, false); assert.equal(z.total, z.goods_total);
 });
+
+test('historique complet d\'une commande : statuts, messages, paiements, livraison', async () => {
+  const adm = await login('admin'); const dr = await mkDriver(adm, '9'); await call('PUT', '/driver/me', { availability: 'available' }, dr.t); const o = await customerOrder('v3');
+  assert.equal((await call('PUT', `/portal/orders/${o.id}/message`, { notes: 'Merci de préparer vite' }, o.t)).status, 200);
+  assert.equal((await call('POST', `/portal/orders/${o.id}/pay-later`, { mode: 'delivery', method_code: 'cash' }, o.t)).status, 200);
+  const d = await call('POST', `/portal/orders/${o.id}/delivery`, { address: '12 rue des Oliviers, Tunis', phone: '98123456', lat: 36.85, lng: 10.25 }, o.t); assert.equal(d.status, 201);
+  const r = await call('GET', `/portal/orders/${o.id}/timeline`, null, o.t); assert.equal(r.status, 200);
+  const kinds = new Set(r.body.events.map((e) => e.kind)); for (const k of ['status', 'message', 'delivery']) assert.ok(kinds.has(k), 'type ' + k);
+  assert.ok(r.body.events.some((e) => /En préparation/i.test(e.title)) && r.body.events.some((e) => e.detail === 'Merci de préparer vite') && r.body.events.some((e) => /Livraison .* demandée/.test(e.title)));
+  assert.deepEqual(r.body.events.map((e) => e.at), [...r.body.events.map((e) => e.at)].sort(), 'ordre chronologique');
+  // la commande d'un autre client reste invisible
+  const o2 = await customerOrder('v4'); assert.equal((await call('GET', `/portal/orders/${o.id}/timeline`, null, o2.t)).status, 404);
+  const l = (await call('GET', '/portal/orders', null, o.t)).body.find((x) => x.id === o.id); assert.ok(l.products && l.decimals !== undefined, 'produits + décimales pour la recherche/filtre');
+});

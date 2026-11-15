@@ -1,5 +1,6 @@
 // Centre d'aide : messages et réclamations (client → pharmacie), réponses signées, échanges entre pharmacies, recherche inter-pharmacies.
 import { get, post, can, state } from '../api.js';
+import { soft } from '../silent.js';
 import { h, clear, fail, toast, badge, icon, table, tabs, when, modal, formModal, debounce, money } from '../ui.js';
 import { filePicker, previewFile, fmtKm } from '../net.js';
 import { onEvent } from '../events.js';
@@ -15,7 +16,7 @@ export default async function (box) {
   const items = customer ? [['in', 'Mes conversations']] : [['in', 'Reçus'], ['out', 'Envoyés'], ...(can('inter.search') ? [['search', 'Rechercher chez d\'autres pharmacies']] : [])];
   const head = h('div'); const nav = () => clear(head).append(h('div', { class: 'row between' }, tabs(items, tab, show), h('button', { class: 'btn primary', onclick: () => compose(customer, draw) }, icon('plus', { size: 16 }), customer ? 'Écrire à une pharmacie' : 'Contacter une pharmacie')));
   box.append(h('h1', {}, 'Centre d\'aide'), head, body); nav(); draw();
-  onEvent('help', () => { if (tab !== 'search') draw(); }, box);
+  onEvent('help', () => { if (tab !== 'search') soft(body, draw); }, box);
   const t0 = new URLSearchParams(location.hash.split('?')[1] || '').get('ticket'); if (t0) openTicket(Number(t0), customer, draw);
 }
 

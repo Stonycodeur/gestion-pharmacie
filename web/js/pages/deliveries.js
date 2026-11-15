@@ -1,6 +1,7 @@
 // Livraisons à domicile (personnel) : file d'attente en temps réel, affectation du chauffeur, avancement, gestion des chauffeurs.
 import { get, post, put, del, can } from '../api.js';
 import { mapView, fmtM, stars, locate } from '../net.js';
+import { soft } from '../silent.js';
 import { h, clear, table, badge, formModal, modal, fail, toast, when, tabs, confirmDialog, icon, money, historyToggle } from '../ui.js';
 import { t } from '../i18n.js';
 import { onEvent } from '../events.js';
@@ -91,5 +92,5 @@ export default async function (box) {
     { label: 'Pièce jointe', render: (x) => (x.has_file ? h('button', { class: 'btn sm', onclick: () => previewFile({ name: x.file_name || 'Pièce jointe', mime: /\.pdf$/i.test(x.file_name || '') ? 'application/pdf' : 'image/jpeg' }, `/delivery-files/report/${x.id}`) }, icon('file', { size: 14 }), 'Voir') : '—') },
     { label: '', render: (x) => manage && x.status === 'open' ? h('span', { class: 'row' }, h('button', { class: 'btn sm primary', onclick: async () => { await put('/delivery-reports/' + x.id, { status: 'reviewed' }); reports(); } }, 'Traité'), h('button', { class: 'btn sm', onclick: async () => { await put('/delivery-reports/' + x.id, { status: 'dismissed' }); reports(); } }, 'Classer')) : null }], r, { empty: 'Aucun signalement' })); }
   box.append(h('h1', {}, t('Livraisons')), head, body);
-  onEvent('delivery', () => { if (tab === 'queue') queue().catch(() => {}); }, box); show('queue');
+  onEvent('delivery', () => { if (tab === 'queue') soft(body, queue); }, box); show('queue');
 }
