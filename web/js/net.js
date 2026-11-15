@@ -161,15 +161,31 @@ export function mapView({ points = [], path = [], height = 280, stage } = {}) {
 import { modal, toast, fail } from './ui.js';
 import { blobUrl, download } from './api.js';
 export const b64 = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(f); });
-export function filePicker({ accept = 'image/jpeg,image/png,application/pdf', max = 3 * 1024 * 1024, label = 'Joindre un fichier' } = {}) {
-  const inp = h('input', { type: 'file', accept }), prev = h('div', { class: 'muted' }); let file = null;
-  inp.addEventListener('change', () => {
-    file = inp.files[0] || null; prev.replaceChildren(); if (!file) return;
+// Photo de profil : recadrage carré centré sur le visage (détection native si disponible), réglable par curseurs, identique sur tous les appareils.
+async function faceCenter(bmp) { try { if ('FaceDetector' in window) { const f = (await new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 }).detect(bmp))[0]; if (f) return { x: (f.boundingBox.x + f.boundingBox.width / 2) / bmp.width, y: (f.boundingBox.y + f.boundingBox.height / 2) / bmp.height }; } } catch { /* détecteur indisponible */ } return null; }
+function squareEditor(bmp, face) {
+  const s = Math.min(bmp.width, bmp.height), slackX = bmp.width - s, slackY = bmp.height - s;
+  // position du carré : sur le visage s'il est détecté ; sinon centré, légèrement vers le haut (les visages sont dans le tiers supérieur d'un portrait)
+  const pos = { x: face && slackX ? Math.min(1, Math.max(0, (face.x * bmp.width - s / 2) / slackX)) : 0.5, y: face && slackY ? Math.min(1, Math.max(0, (face.y * bmp.height - s / 2) / slackY)) : 0.3 };
+  const cv = h('canvas', { width: 160, height: 160, class: 'avatar-lg', style: { width: '120px', height: '120px', borderRadius: '50%' }, role: 'img', 'aria-label': 'Aperçu de la photo de profil' });
+  const draw = (c, out) => { const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, out, out); x.drawImage(bmp, slackX * pos.x, slackY * pos.y, s, s, 0, 0, out, out); };
+  const slider = (label, key, on) => h('label', { class: 'f', style: { opacity: on ? 1 : .4 } }, label, h('input', { type: 'range', min: 0, max: 100, value: Math.round(pos[key] * 100), disabled: !on, oninput: (e) => { pos[key] = e.target.value / 100; draw(cv, 160); } }));
+  draw(cv, 160);
+  return { el: h('div', { class: 'row', style: { gap: '14px', alignItems: 'center', flexWrap: 'wrap' } }, cv, h('div', { style: { flex: 1, minWidth: '160px' } }, h('small', { class: 'muted' }, 'Ajustez pour que le visage soit bien dans le cercle'), slider('Horizontal', 'x', slackX > 1), slider('Vertical', 'y', slackY > 1))),
+    async blob() { const c = document.createElement('canvas'); c.width = c.height = 512; draw(c, 512); return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9)); } };
+}
+export function filePicker({ accept = 'image/jpeg,image/png,application/pdf', max = 3 * 1024 * 1024, label = 'Joindre un fichier', square = false } = {}) {
+  const inp = h('input', { type: 'file', accept }), prev = h('div', { class: 'muted' }); let file = null, editor = null;
+  inp.addEventListener('change', async () => {
+    file = inp.files[0] || null; editor = null; prev.replaceChildren(); if (!file) return;
+    if (square) { // la photo est réduite et recadrée avant envoi : on accepte les grosses photos de téléphone
+      if (file.size > 15 * 1048576) { toast('Fichier trop volumineux (15 Mo max)', true); inp.value = ''; file = null; return; }
+      try { const bmp = await createImageBitmap(file); editor = squareEditor(bmp, await faceCenter(bmp)); prev.append(editor.el); } catch { toast('Image illisible : choisissez un JPEG, PNG ou WebP', true); inp.value = ''; file = null; } return; }
     if (file.size > max) { toast(`Fichier trop volumineux (${Math.round(max / 1048576)} Mo max)`, true); inp.value = ''; file = null; return; }
     const url = URL.createObjectURL(file);
     prev.append(file.type === 'application/pdf' ? h('div', {}, h('a', { href: url, target: '_blank', rel: 'noopener' }, `Aperçu du PDF : ${file.name}`), h('iframe', { src: url, title: 'Aperçu', style: { width: '100%', height: '260px', border: '1px solid var(--line)', borderRadius: '8px', marginTop: '6px' } })) : h('img', { src: url, alt: 'Aperçu avant envoi', style: { maxWidth: '100%', maxHeight: '240px', borderRadius: '8px', border: '1px solid var(--line)' } }), h('div', { class: 'muted' }, `${file.name} · ${(file.size / 1024).toFixed(0)} Ko`));
   });
-  return { el: h('label', { class: 'f' }, label, inp, prev), get file() { return file; }, payload: async () => (file ? { mime: file.type, name: file.name, data_base64: await b64(file) } : undefined) };
+  return { el: h('label', { class: 'f' }, label, inp, prev), get file() { return file; }, payload: async () => (file ? editor ? { mime: 'image/jpeg', name: 'photo.jpg', data_base64: await b64(await editor.blob()) } : { mime: file.type, name: file.name, data_base64: await b64(file) } : undefined) };
 }
 export async function previewFile(f, path) {
   try {

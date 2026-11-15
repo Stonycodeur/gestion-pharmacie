@@ -267,5 +267,3 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) naviga
   }
 })();
 
-// Liens cliqués : soulignés durablement (menu, onglets, notifications, liens) pour retrouver d'où l'on vient.
-document.addEventListener('click', (e) => { const el = e.target.closest?.('a[href], .tabs button, .it[role=link], .tabbar a, .sheet a'); if (el) el.classList.add('clicked'); }, true);

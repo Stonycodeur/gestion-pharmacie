@@ -6,7 +6,7 @@ import { phoneField, filePicker } from '../net.js';
 export default async function (box) {
   const me = await get('/me/profile'); const avatarBox = h('div');
   const paint = (url) => clear(avatarBox).append(url ? h('img', { class: 'avatar-lg', src: url, alt: 'Photo de profil' }) : h('div', { class: 'avatar-lg' }, (me.name || '?').split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase())); paint(me.avatar_url);
-  const pick = filePicker({ accept: 'image/png,image/jpeg,image/webp', max: 1024 * 1024, label: 'Choisir une photo (PNG, JPEG ou WebP, 1 Mo max)' });
+  const pick = filePicker({ accept: 'image/png,image/jpeg,image/webp', square: true, label: 'Choisir une photo' });
   const name = h('input', { value: me.name, required: true, maxLength: 120 }), phone = phoneField({ value: me.phone || '' });
   const lang = h('select', {}, [['fr', 'Français'], ['en', 'English'], ['ar', 'العربية']].map(([v, l]) => h('option', { value: v, selected: me.lang === v }, l)));
   if (me.is_guest) { box.append(h('h1', {}, 'Mon profil'), h('div', { class: 'alert info' }, 'Vous êtes connecté en invité : créez un compte pour avoir un profil, un historique et des privilèges.')); return; }

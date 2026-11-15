@@ -64,7 +64,7 @@ export default async function (box) {
   }
   const chat = (d) => chatModal('', d, { me: 'staff', readOnly: true });
   // Profil partagé du chauffeur (photo, pièce d'identité réservée à l'administration)
-  const profile = (d) => { const fp = filePicker({ accept: 'image/jpeg,image/png,image/webp', max: 1024 * 1024, label: 'Photo de profil' }), id = filePicker({ label: 'Pièce d\'identité' });
+  const profile = (d) => { const fp = filePicker({ accept: 'image/jpeg,image/png,image/webp', square: true, label: 'Photo de profil' }), id = filePicker({ label: 'Pièce d\'identité' });
     modal(`Chauffeur — ${d.name}`, h('div', {}, h('div', { class: 'offer' }, avatar(d.photo_url, d.name, 72), h('div', {}, h('strong', {}, d.name), h('div', { class: 'muted' }, `Matricule ${d.matricule} · ${d.vehicle_type || ''} ${d.plate || ''}`), stars(d.rating_count ? d.rating_sum / d.rating_count : null))),
       h('div', { class: 'muted', style: { margin: '8px 0' } }, t('Tarifs : voir Paramètres › Livraison (4 modes)')), (d.pharmacies || []).map((p) => h('div', { class: 'muted' }, icon('pin', { size: 14 }), ' ', p.name, p.depart_label ? ' — ' + p.depart_label : '')),
       adm ? h('div', {}, h('hr'), fp.el, h('button', { class: 'btn sm', onclick: async () => { try { if (!fp.file) throw new Error('Choisissez une photo'); await put(`/drivers/${d.id}/photo`, { file: await fp.payload() }); toast('Photo enregistrée'); show('drivers'); } catch (e) { fail(e); } } }, 'Enregistrer la photo'),
