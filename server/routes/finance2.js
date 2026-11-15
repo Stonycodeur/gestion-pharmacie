@@ -42,11 +42,11 @@ export function runSubscriptions() {
     const number = nextNumber(s.pharmacy_id, 'sub_invoice', 'ABO'); insert('INSERT INTO subscription_invoices(subscription_id,pharmacy_id,customer_id,number,amount,currency,due_on) VALUES (?,?,?,?,?,?,?)', s.id, s.pharmacy_id, s.customer_id, number, s.amount, s.currency, s.next_run);
     run('UPDATE subscriptions SET next_run=?, runs=runs+1 WHERE id=?', nextDate(s.next_run, s.period), s.id); made++;
     const ph = get('SELECT currency_decimals d FROM pharmacies WHERE id=?', s.pharmacy_id), cu = get('SELECT user_id FROM customers WHERE id=?', s.customer_id)?.user_id;
-    if (cu) notify({ pharmacyId: s.pharmacy_id, userId: cu, kind: 'payment', link: '/portal?tab=subscriptions', title: `Échéance ${number} : ${money(s.amount, ph.d)} ${s.currency}`, body: s.label });
+    if (cu) notify({ pharmacyId: s.pharmacy_id, userId: cu, kind: 'payment', link: `#/portal?tab=subscriptions&id=${s.id}`, title: `Échéance ${number} : ${money(s.amount, ph.d)} ${s.currency}`, body: s.label });
   });
   for (const i of all("SELECT * FROM subscription_invoices WHERE status='due' AND due_on<=? AND reminded_at IS NULL", addDays(today, -3).slice(0, 10))) { // rappel après 3 jours d'impayé
     const cu = get('SELECT user_id FROM customers WHERE id=?', i.customer_id)?.user_id; run("UPDATE subscription_invoices SET reminded_at=datetime('now') WHERE id=?", i.id);
-    if (cu) notify({ pharmacyId: i.pharmacy_id, userId: cu, kind: 'payment', link: '/portal?tab=subscriptions', title: `Rappel : échéance ${i.number} impayée`, body: `Échue le ${i.due_on}` });
+    if (cu) notify({ pharmacyId: i.pharmacy_id, userId: cu, kind: 'payment', link: `#/portal?tab=subscriptions&id=${i.id}`, title: `Rappel : échéance ${i.number} impayée`, body: `Échue le ${i.due_on}` });
   }
   return made;
 }

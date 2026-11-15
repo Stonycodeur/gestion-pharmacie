@@ -67,6 +67,7 @@ function create(ctx, order, b, userId) {
   }
   const number = nextNumber(order.pharmacy_id, 'delivery', 'LIV');
   const id = insert('INSERT INTO deliveries(pharmacy_id,order_id,customer_id,number,address,phone,notes,fee,dest_lat,dest_lng,driver_id,driver_response,distance_m,eta_min,eta_max,offer_mode,standard_fee,mode,scheduled_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', order.pharmacy_id, order.id, order.customer_id, number, address, phone, notes, fee, lat, lng, driverId, driverId ? 'pending' : 'none', q?.distance_m ?? null, cfg.eta[mode][0] || null, cfg.eta[mode][1] || null, offerMode, standard, mode, scheduledAt);
+  run('UPDATE customer_orders SET wants_delivery=1 WHERE id=?', order.id); // le client a demandé la livraison : la question « Souhaitez-vous être livré ? » ne se repose plus
   let d = get('SELECT * FROM deliveries WHERE id=?', id); addEvent(d, 'issued', null, userId);
   if (order.status === 'ready') { readyForDelivery(d, userId); d = get('SELECT * FROM deliveries WHERE id=?', id); } // commande déjà prête : le chauffeur part directement
   if (driverId) { const du = get('SELECT user_id FROM drivers WHERE id=?', driverId)?.user_id; if (du) notify({ pharmacyId: order.pharmacy_id, userId: du, kind: 'delivery', title: `Nouvelle course ${number}`, body: address, link: '#/driver' }); }

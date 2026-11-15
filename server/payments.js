@@ -26,6 +26,10 @@ const appUrl = () => (process.env.APP_URL || 'http://localhost:3000').replace(/\
 const apiUrl = () => (process.env.API_PUBLIC_URL || process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '') + '/api/v1';
 
 export const orderTotal = (orderId) => get('SELECT COALESCE(SUM(l.qty * p.sale_price),0) v FROM order_lines l JOIN products p ON p.id=l.product_id WHERE l.order_id=?', orderId).v;
+// Frais de livraison de la course en cours (hors courses annulées) : suit les contre-propositions acceptées et les changements de mode.
+export const deliveryOf = (orderId) => get("SELECT id,fee,status,mode FROM deliveries WHERE order_id=? AND status<>'cancelled' ORDER BY id DESC LIMIT 1", orderId);
+export const deliveryFee = (orderId) => deliveryOf(orderId)?.fee || 0;
+export const orderGrandTotal = (orderId) => orderTotal(orderId) + deliveryFee(orderId); // commande + livraison
 export const orderPaid = (orderId) => get("SELECT COALESCE(SUM(amount),0) v FROM order_deposits WHERE order_id=? AND status IN ('held','applied')", orderId).v;
 
 // ---- ouverture d'un paiement chez le prestataire ----
@@ -78,7 +82,7 @@ export function markPaid(opId, detail) {
     const rc = createReceipt({ ...op, status: 'paid' }, m?.label || op.method_code); receiptId = rc.id;
     audit({ ph: op.pharmacy_id, user: null, ip: null }, 'payment.online_paid', 'order', op.order_id, undefined, { amount: op.amount, method: op.method_code, ref: op.provider_ref });
     notify({ pharmacyId: op.pharmacy_id, audience: 'staff', kind: 'payment', title: `Paiement en ligne reçu — ${o.number}`, link: `#/orders?id=${o.id}` });
-    if (op.user_id) notify({ pharmacyId: op.pharmacy_id, userId: op.user_id, kind: 'payment', link: '/portal?tab=receipts', title: `Paiement réussi : ${(op.amount / 10 ** rc.decimals).toFixed(rc.decimals)} ${rc.currency}`, body: `Reçu ${rc.number} · réf. ${rc.reference} · ${rc.method_label} · ${rc.created_at} UTC · statut : payé` });
+    if (op.user_id) notify({ pharmacyId: op.pharmacy_id, userId: op.user_id, kind: 'payment', link: `#/portal?tab=orders&id=${op.order_id}`, title: `Paiement réussi : ${(op.amount / 10 ** rc.decimals).toFixed(rc.decimals)} ${rc.currency}`, body: `Reçu ${rc.number} · réf. ${rc.reference} · ${rc.method_label} · ${rc.created_at} UTC · statut : payé` });
     publish(op.pharmacy_id, 'order', { id: op.order_id, payment: 'paid' }, op.user_id);
     emitEvent(op.pharmacy_id, 'payment.paid', { payment_id: op.id, order: o.number, amount: op.amount, currency: rc.currency, method: op.method_code, receipt: rc.number, reference: op.provider_ref });
     return { ...op, status: 'paid' };

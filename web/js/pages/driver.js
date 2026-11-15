@@ -59,7 +59,7 @@ export default async function (box) {
       h('div', { class: 'muted' }, `${t('Par kilomètre')} : ${fm(p.per_km, p)} · ${t('Distance maximale')} : ${p.max_km} km`, p.express_pct ? ` · Express +${p.express_pct} %` : '', p.negotiation ? ` · ${t('Contre-proposition autorisée')} (±${p.margin_pct} %)` : ` · ${t('Contre-proposition désactivée')}`))));
   };
   const offer = (o) => {
-    const mine = o.my_offer, c = h('div', { class: 'card', style: { marginBottom: '12px', borderLeft: '4px solid var(--accent, #0f766e)' } },
+    const mine = o.my_offer, c = h('div', { class: 'card', 'data-rid': String(o.id), style: { marginBottom: '12px', borderLeft: '4px solid var(--accent, #0f766e)' } },
       h('div', { class: 'row between' }, h('span', {}, h('strong', {}, o.number), ' ', badge(o.mode_label || 'Livraison Standard', o.mode === 'express' ? 'bad' : o.mode === 'economy' ? 'ok' : 'info'), o.scheduled_at ? h('div', { class: 'muted' }, icon('clock', { size: 13 }), ' ', t('Programmée'), ' : ', when(o.scheduled_at.replace(' ', 'T') + 'Z')) : null), h('strong', { style: { fontSize: '1.2em' } }, fm(o.price, { currency: o.currency, decimals: o.decimals }))),
       o.customer_name ? h('div', { class: 'muted' }, icon('user', { size: 14 }), ' ', t('Client'), ' : ', o.customer_name) : null,
       h('div', {}, icon('store', { size: 14 }), ' Départ : ', h('strong', {}, o.pharmacy_name), o.pharmacy_address ? ' — ' + o.pharmacy_address : ''), h('div', {}, icon('pin', { size: 14 }), ' Livraison : ', o.address),
@@ -74,7 +74,7 @@ export default async function (box) {
   };
   const course = (d, ph) => {
     const live = d.status === 'in_progress', accepted = d.driver_response === 'accepted', offered = ['issued', 'received'].includes(d.status) && d.driver_response === 'pending', open = ['issued', 'received', 'in_progress'].includes(d.status);
-    const c = h('div', { class: 'card', style: { marginBottom: '12px' } }, h('div', { class: 'row between' }, h('strong', {}, d.number), badge(offered ? 'À accepter' : ST[d.status], offered ? 'warn' : d.status === 'delivered' ? 'ok' : live ? 'info' : '')),
+    const c = h('div', { class: 'card', 'data-rid': String(d.id), style: { marginBottom: '12px' } }, h('div', { class: 'row between' }, h('strong', {}, d.number), badge(offered ? 'À accepter' : ST[d.status], offered ? 'warn' : d.status === 'delivered' ? 'ok' : live ? 'info' : '')),
       h('div', {}, icon('pin', { size: 14 }), ' ', d.address), h('div', { class: 'muted' }, [d.distance_m != null ? fmtM(d.distance_m) : null, d.eta_min ? `${d.eta_min}–${d.eta_max} min` : null, `Prix : ${money(d.fee)}`].filter(Boolean).join(' · ')), d.notes ? h('div', { class: 'muted' }, d.notes) : null);
     const slot = h('div'); c.append(slot); partiesCard('/driver', d.id, 'driver').then((p) => slot.append(p)).catch(() => {});
     if (d.dest_lat != null && open) { // course terminée : plus d'itinéraire

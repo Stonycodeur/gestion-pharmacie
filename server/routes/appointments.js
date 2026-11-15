@@ -28,7 +28,7 @@ router.post('/doctor/appointments/:id/decision', { perm: 'doctor.use', needsPhar
   const st = oneOf(ctx.body.status, 'décision', ['confirmed', 'refused', 'done'], { required: true }); const ok = { requested: ['confirmed', 'refused'], confirmed: ['done', 'refused'] }[a.status];
   if (!ok || !ok.includes(st)) throw conflict('BAD_TRANSITION', 'Décision impossible dans cet état'); const note = str(ctx.body.note, 'note', { max: 400 });
   run("UPDATE appointments SET status=?, doctor_note=?, updated_at=datetime('now') WHERE id=?", st, note, a.id); if (st === 'refused') run("UPDATE appointment_slots SET status='open' WHERE id=?", a.slot_id);
-  notify({ pharmacyId: a.pharmacy_id, userId: a.customer_user_id, kind: 'appointment', title: `Rendez-vous ${{ confirmed: 'confirmé', refused: 'refusé', done: 'terminé' }[st]} — ${a.starts_at}`, body: note, link: '#/portal' }); audit({ ...ctx, ph: a.pharmacy_id }, 'appointment.' + st, 'appointment', a.id); return { ok: true };
+  notify({ pharmacyId: a.pharmacy_id, userId: a.customer_user_id, kind: 'appointment', title: `Rendez-vous ${{ confirmed: 'confirmé', refused: 'refusé', done: 'terminé' }[st]} — ${a.starts_at}`, body: note, link: `#/portal?tab=appts&id=${a.id}` }); audit({ ...ctx, ph: a.pharmacy_id }, 'appointment.' + st, 'appointment', a.id); return { ok: true };
 }));
 
 // ---- client ----

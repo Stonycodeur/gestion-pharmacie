@@ -326,3 +326,9 @@ details.past>summary .tri{display:inline-block;font-size:.8em;color:var(--brand)
 details.past[open]>summary .tri{transform:rotate(90deg)}
 .view-crumb{color:var(--muted);font-weight:500}
 .empty[hidden]{display:none!important}
+
+/* Liens déjà cliqués : soulignement net sous le libellé */
+a:visited,a.clicked,.tabs button.clicked,.it.clicked>div:first-child,.it:not(.unread)>div:first-child{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:4px;text-decoration-color:var(--brand)}
+.nav a.clicked .ic,.tabbar a.clicked .ic{filter:none}
+.nav a.clicked::before,.tabbar a.clicked span{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:4px;text-decoration-color:var(--brand)}
+.btn.clicked{text-decoration:none}

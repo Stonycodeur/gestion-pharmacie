@@ -5,7 +5,8 @@ import { router, audit, can, config, notify } from '../http.js';
 import { get, all, run, insert, tx, getSetting } from '../db.js';
 import { bad, conflict, notFound, forbidden, str, int, oneOf, toCsv, HttpError } from '../util.js';
 import { modesFor, ensurePharmacyMethods } from '../paymodes.js';
-import { cfgOf, markPaid, markFailed, verifyGeneric, orderTotal, orderPaid, getPath, FORBIDDEN_FIELD } from '../payments.js';
+import { cfgOf, markPaid, markFailed, verifyGeneric, orderTotal, orderPaid, deliveryOf, getPath, FORBIDDEN_FIELD } from '../payments.js';
+import { MODES } from '../delivery_config.js';
 import { CATALOG } from '../payment-catalog.js';
 import { receiptView, receiptPdf, emailReceipt, receiptPublicPdfUrl, verifyUrl, sealValid } from '../receipts.js';
 import { qrSvg } from '../qr.js';
@@ -56,24 +57,26 @@ router.put('/payment-methods/:id/settings', { needsPharmacy: false, ok200: true 
 const quote = (o) => {
   const lines = all('SELECT p.name label, p.sale_price unit, l.qty, l.qty*p.sale_price total, p.tax_rate FROM order_lines l JOIN products p ON p.id=l.product_id WHERE l.order_id=?', o.id);
   const total = lines.reduce((a, l) => a + l.total, 0), tax = lines.reduce((a, l) => a + (l.total - Math.round(l.total / (1 + l.tax_rate / 100))), 0);
-  return { lines, total, tax, paid: orderPaid(o.id), due: Math.max(0, total - orderPaid(o.id)) };
+  // Total à payer = commande + livraison (si une course est enclenchée) ; recalculé à chaque appel
+  const dl = deliveryOf(o.id), fee = dl?.fee || 0, paid = orderPaid(o.id);
+  return { lines, goods_total: total, delivery_fee: fee, delivery: dl ? { id: dl.id, status: dl.status, mode: dl.mode, mode_label: MODES[dl.mode]?.label || dl.mode } : null, total: total + fee, tax, paid, due: Math.max(0, total + fee - paid) };
 };
 router.get('/portal/orders/:id/payment-options', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => {
   const o = get('SELECT * FROM customer_orders WHERE id=? AND customer_id IN (SELECT id FROM customers WHERE user_id=?)', ctx.params.id, ctx.user.id); if (!o) throw notFound('Commande');
   const ph = get('SELECT p.name,p.currency,p.currency_decimals,c.iso2 FROM pharmacies p LEFT JOIN countries c ON c.id=p.country_id WHERE p.id=?', o.pharmacy_id);
   const modes = modesFor(o.pharmacy_id);
-  return { pharmacy: ph.name, currency: ph.currency, decimals: ph.currency_decimals, ...quote(o), order_number: o.number, methods: modes.online, modes, wants_delivery: o.wants_delivery, pay_mode: o.pay_mode, pay_method_code: o.pay_method_code, has_delivery: !!get('SELECT 1 FROM deliveries WHERE order_id=?', o.id) };
+  return { pharmacy: ph.name, currency: ph.currency, decimals: ph.currency_decimals, ...quote(o), order_number: o.number, methods: modes.online, modes, ...(deliveryOf(o.id) ? { wants_delivery: 1 } : { wants_delivery: o.wants_delivery }), pay_mode: o.pay_mode, pay_method_code: o.pay_method_code, has_delivery: !!deliveryOf(o.id) };
 });
 // Règlement « plus tard » : à la caisse (retrait) ou à la livraison (espèces / carte au livreur). Aucune donnée sensible ; la pharmacie est prévenue.
 router.post('/portal/orders/:id/pay-later', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false, ok200: true }, (ctx) => {
   const o = get('SELECT * FROM customer_orders WHERE id=? AND customer_id IN (SELECT id FROM customers WHERE user_id=?)', ctx.params.id, ctx.user.id); if (!o) throw notFound('Commande');
   if (['cancelled', 'expired', 'picked_up'].includes(o.status)) throw conflict('BAD_STATE', 'Cette commande n\'est plus modifiable');
-  const mode = oneOf(String(ctx.body.mode || ''), 'mode', ['counter', 'delivery']); const modes = modesFor(o.pharmacy_id), m = modes[mode].find((x) => x.code === String(ctx.body.method_code || ''));
+  const mode = oneOf(String(ctx.body.mode || ''), 'mode', ['counter', 'delivery']); if (mode === 'counter' && deliveryOf(o.id)) throw conflict('DELIVERY_REQUESTED', 'Une livraison est déjà demandée : le règlement se fait en ligne ou au livreur'); const modes = modesFor(o.pharmacy_id), m = modes[mode].find((x) => x.code === String(ctx.body.method_code || ''));
   if (!m) throw bad('VALIDATION', 'Mode de paiement indisponible dans cette pharmacie');
   run('UPDATE customer_orders SET wants_delivery=?, pay_mode=?, pay_method_code=? WHERE id=?', mode === 'delivery' ? 1 : 0, mode, m.code, o.id);
   notify({ pharmacyId: o.pharmacy_id, audience: 'staff', kind: 'order', link: '#/orders?id=' + o.id, title: `Commande ${o.number} : ${mode === 'counter' ? 'paiement à la caisse' : 'paiement à la livraison'}`, body: `Mode choisi : ${m.label}` });
   audit(ctx, 'order.pay_later', 'order', o.id, undefined, { mode, method: m.code });
-  return { ok: true, instructions: mode === 'counter' ? `Réglez ${m.label.toLowerCase()} à la caisse de la pharmacie lors du retrait de votre commande.` : `Vous réglerez (${m.label.toLowerCase()}) au livreur à la réception de votre commande.` };
+  const qt = quote(o); return { ok: true, amounts: { goods: qt.goods_total, delivery: qt.delivery_fee, total: qt.total, due: qt.due }, instructions: mode === 'counter' ? `Réglez ${m.label.toLowerCase()} à la caisse de la pharmacie lors du retrait de votre commande.` : `Vous réglerez (${m.label.toLowerCase()}) au livreur à la réception de votre commande.` };
 });
 router.post('/portal/orders/:id/wants-delivery', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false, ok200: true }, (ctx) => {
   const o = get('SELECT id FROM customer_orders WHERE id=? AND customer_id IN (SELECT id FROM customers WHERE user_id=?)', ctx.params.id, ctx.user.id); if (!o) throw notFound('Commande');
@@ -134,7 +137,7 @@ router.post('/online-payments/:id/refund', { perm: 'sales.refund', ok200: true }
   tx(() => { insert('INSERT INTO payment_refunds(online_payment_id,pharmacy_id,amount,reason,user_id,gateway_status,gateway_ref) VALUES (?,?,?,?,?,?,?)', op.id, op.pharmacy_id, amount, reason, ctx.user.id, gw.status === 'done' ? 'done' : 'manual', gw.ref || null); run('UPDATE online_payments SET refunded=refunded+? WHERE id=?', amount, op.id);
     if (op.refunded + amount >= op.amount && op.deposit_id) run("UPDATE order_deposits SET status='refunded' WHERE id=? AND status='held'", op.deposit_id); });
   audit(ctx, 'payment.refund', 'order', op.order_id, undefined, { amount, reason, op: op.id, gateway: gw.status });
-  if (op.user_id) notify({ pharmacyId: op.pharmacy_id, userId: op.user_id, kind: 'payment', link: '/portal?tab=receipts', title: 'Remboursement enregistré', body: `${(amount / 10 ** phr.currency_decimals).toFixed(phr.currency_decimals)} remboursés — ${reason}` });
+  if (op.user_id) notify({ pharmacyId: op.pharmacy_id, userId: op.user_id, kind: 'payment', link: `#/portal?tab=orders&id=${op.order_id}`, title: 'Remboursement enregistré', body: `${(amount / 10 ** phr.currency_decimals).toFixed(phr.currency_decimals)} remboursés — ${reason}` });
   emitEvent(op.pharmacy_id, 'payment.refunded', { payment_id: op.id, amount, currency: op.currency || phr.currency, reason, gateway: gw.status, gateway_ref: gw.ref || null });
   return { ok: true, gateway: gw.status, gateway_ref: gw.ref || null, gateway_manual: gw.status !== 'done' && !['manual', 'sandbox'].includes(m?.provider) }; // 'done' : l'argent a été rendu chez le prestataire par l'application
 });

@@ -6,7 +6,7 @@ import { modesFor } from '../paymodes.js';
 import { rateLimit } from '../security.js';
 import { randomInt, createHash } from 'node:crypto';
 import { sendSms, smsEnabled } from '../sms.js';
-import { PROVIDERS, FORBIDDEN_FIELD, commissionOf, cfgOf, saveCfg, startCheckout, markPaid, markFailed, verifyStripe, verifyKonnect, orderTotal, orderPaid, sandboxAllowed } from '../payments.js';
+import { PROVIDERS, FORBIDDEN_FIELD, commissionOf, cfgOf, saveCfg, startCheckout, markPaid, markFailed, verifyStripe, verifyKonnect, orderTotal, orderGrandTotal, orderPaid, sandboxAllowed } from '../payments.js';
 
 const needSuper = (ctx) => { if (ctx.user.role !== 'super_admin') throw forbidden('Réservé au super-administrateur'); };
 const mask = (m, reveal) => { const cfg = cfgOf(m); const out = { ...m, config: undefined, has_config: Object.fromEntries(Object.keys(PROVIDERS[m.provider]?.fields.length ? Object.fromEntries(PROVIDERS[m.provider].fields.map((f) => [f, 1])) : {}).map((f) => [f, !!cfg[f]])) }; if (reveal) out.config = cfg; return out; };
@@ -89,7 +89,7 @@ router.post('/portal/orders/:id/pay', { anyPerm: ['portal.use', 'portal.guest'],
   const c = myCustomer(ctx); const o = get('SELECT * FROM customer_orders WHERE id=? AND customer_id IN (SELECT id FROM customers WHERE user_id=?)', ctx.params.id, ctx.user.id); if (!o) throw notFound('Commande');
   if (['cancelled', 'expired', 'picked_up'].includes(o.status)) throw conflict('BAD_STATE', 'Cette commande n\'est plus payable');
   const m = get('SELECT * FROM payment_methods WHERE code=? AND enabled=1 AND channel_online=1', String(ctx.body.method_code || '')); if (!m || !modesFor(o.pharmacy_id).online.some((x) => x.code === m.code)) throw bad('VALIDATION', 'Mode de paiement indisponible pour cette pharmacie');
-  const due = orderTotal(o.id) - orderPaid(o.id) - get("SELECT COALESCE(SUM(amount),0) v FROM online_payments WHERE order_id=? AND status IN ('pending','awaiting_manual')", o.id).v;
+  const due = orderGrandTotal(o.id) - orderPaid(o.id) - get("SELECT COALESCE(SUM(amount),0) v FROM online_payments WHERE order_id=? AND status IN ('pending','awaiting_manual')", o.id).v;
   if (due < 1) throw conflict('ALREADY_PAID', 'Rien à payer (déjà réglé ou paiement en cours)');
   const ph = get('SELECT currency,currency_decimals FROM pharmacies WHERE id=?', o.pharmacy_id);
   // Médicaments sur ordonnance : aucun paiement sans ordonnance du client VALIDÉE par un humain (pharmacien/médecin) couvrant le produit.

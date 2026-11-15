@@ -67,3 +67,21 @@ test('fuseau horaire déduit du pays et de la position, plus de saisie manuelle'
   const mk = async (b) => { const r = await call('POST', '/pharmacies', { name: 'TZ ' + Math.random(), currency: 'XAF', currency_decimals: 0, country_id: id('GA'), ...b }, sa); assert.equal(r.status, 201, JSON.stringify(r.body)); return (await call('GET', '/pharmacies', null, sa)).body.find((p) => p.id === r.body.id).timezone; };
   assert.equal(await mk({}), 'Africa/Libreville'); assert.equal(await mk({ timezone: 'Africa/Tunis' }), 'Africa/Libreville');
 });
+
+test('livraison déjà demandée : plus de question « livré ? », total = commande + livraison, mis à jour avec la course', async () => {
+  const adm = await login('admin'); const dr = await mkDriver(adm, '8'); await call('PUT', '/driver/me', { availability: 'available' }, dr.t); const o = await customerOrder('v2');
+  const before = (await call('GET', `/portal/orders/${o.id}/payment-options`, null, o.t)).body; assert.equal(before.has_delivery, false); assert.equal(before.delivery_fee, 0); assert.equal(before.total, before.goods_total);
+  assert.equal((await call('POST', `/portal/orders/${o.id}/pay-later`, { mode: 'delivery', method_code: 'cash' }, o.t)).status, 200); // déjà choisi « livré » → wants_delivery=1 sans course
+  const d = await call('POST', `/portal/orders/${o.id}/delivery`, { address: '12 rue des Oliviers, Tunis', phone: '98123456', lat: 36.85, lng: 10.25 }, o.t); assert.equal(d.status, 201, JSON.stringify(d.body));
+  const q = (await call('GET', `/portal/orders/${o.id}/payment-options`, null, o.t)).body;
+  assert.equal(q.has_delivery, true); assert.equal(q.wants_delivery, 1); assert.equal(q.delivery_fee, d.body.fee); assert.ok(q.delivery_fee > 0); assert.equal(q.total, q.goods_total + q.delivery_fee); assert.equal(q.due, q.total);
+  // retrait à la caisse impossible quand une course est enclenchée
+  assert.equal((await call('POST', `/portal/orders/${o.id}/pay-later`, { mode: 'counter', method_code: 'cash' }, o.t)).body.error.code, 'DELIVERY_REQUESTED');
+  const r = await call('POST', `/portal/orders/${o.id}/pay-later`, { mode: 'delivery', method_code: 'cash' }, o.t); assert.equal(r.body.amounts.total, q.total); assert.equal(r.body.amounts.delivery, q.delivery_fee);
+  // contre-proposition acceptée → le total suit
+  const { run } = await import('../server/db.js'); run('UPDATE deliveries SET fee=? WHERE id=?', d.body.fee + 300, d.body.id);
+  assert.equal((await call('GET', `/portal/orders/${o.id}/payment-options`, null, o.t)).body.total, q.goods_total + d.body.fee + 300);
+  // course annulée → on revient au total de la commande seule
+  run("UPDATE deliveries SET status='cancelled' WHERE id=?", d.body.id);
+  const z = (await call('GET', `/portal/orders/${o.id}/payment-options`, null, o.t)).body; assert.equal(z.has_delivery, false); assert.equal(z.total, z.goods_total);
+});

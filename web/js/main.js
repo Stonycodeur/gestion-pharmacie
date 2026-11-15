@@ -192,7 +192,7 @@ function paintNet() {
 // Ouvre une notification : va à la page concernée ; sans page associée, affiche le message complet.
 function openNotification(n) {
   if (n.id) post('/notifications/read', { ids: [n.id] }).then(loadNotifs).catch(() => {}); // lue = retirée de la liste
-  if (n.link) { location.hash = String(n.link).startsWith('#') ? n.link : '#/' + n.link; return; }
+  if (n.link) { const h2 = String(n.link).startsWith('#') ? n.link : '#/' + n.link; if (location.hash === h2) window.dispatchEvent(new HashChangeEvent('hashchange')); else location.hash = h2; return; }
   modal(n.title, h('div', {}, n.body ? h('p', { style: { whiteSpace: 'pre-wrap' } }, n.body) : h('p', { class: 'muted' }, 'Aucun détail.'), n.created_at ? h('small', { class: 'muted' }, when(n.created_at)) : null));
 }
 // Page visée par une notification (« #/orders?id=5 », « /portal?tab=receipts » → orders / portal) et élément précis (id).
@@ -206,8 +206,9 @@ function paintMenuCounters(rows) {
 // Une fois la page affichée, met en évidence (et ouvre) la ligne visée par la notification.
 function focusItem(box, id) {
   if (!id) return; let tries = 0; const go = () => { const el = [...box.querySelectorAll('[data-rid]')].find((x) => x.dataset.rid === String(id));
-    if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 3000); if (el.tagName === 'TR' && el.style.cursor === 'pointer') el.click(); return; }
-    if (++tries < 20) setTimeout(go, 200); }; go();
+    if (el) { let d = el.closest('details'); while (d) { d.open = true; d = d.parentElement?.closest('details'); } el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 3000); if (el.tagName === 'TR' && el.style.cursor === 'pointer') el.click(); return; }
+    if (tries === 3 || tries === 8) box.querySelectorAll('details.past:not([open])').forEach((d) => { d.open = true; }); // l'élément est peut-être dans « passées » (chargé à l'ouverture)
+    if (++tries < 25) setTimeout(go, 200); }; go();
 }
 async function loadNotifs() {
   if (state.offline || !net.online) return;
@@ -265,3 +266,6 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) naviga
     try { const st = await api('GET', '/auth/setup-status'); st.needed ? setupScreen(st) : loginScreen(); } catch { loginScreen(); }
   }
 })();
+
+// Liens cliqués : soulignés durablement (menu, onglets, notifications, liens) pour retrouver d'où l'on vient.
+document.addEventListener('click', (e) => { const el = e.target.closest?.('a[href], .tabs button, .it[role=link], .tabbar a, .sheet a'); if (el) el.classList.add('clicked'); }, true);

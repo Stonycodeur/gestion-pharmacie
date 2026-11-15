@@ -15,7 +15,7 @@ export const prefsGet = async () => { try { return await get('/me/preferences');
 const DKIND = { issued: 'warn', received: 'info', in_progress: 'info', delivered: 'ok', failed: 'bad', cancelled: '' };
 
 export const driverCard = (d) => (d.driver ? h('div', { class: 'card', style: { background: 'var(--panel2)', padding: '10px 12px', marginTop: '8px' } }, icon('truck', { size: 18 }), ' ', h('strong', {}, d.driver.name), h('div', { class: 'muted' }, `${t('Matricule')} : `, h('strong', {}, d.driver.matricule), d.driver.phone ? ` · ${d.driver.phone}` : '', d.driver.vehicle ? ` · ${d.driver.vehicle}` : '')) : null);
-export const deliveryCard = (d) => h('div', { class: 'card', style: { marginBottom: '12px' } }, h('div', { class: 'row between' }, h('div', {}, h('strong', {}, `${t('Livraison')} ${d.number}`), h('div', { class: 'muted' }, `${t('Commande')} ${d.order_number} · ${d.address}`)), badge(d.status_label, DKIND[d.status])), driverCard(d), timeline(d));
+export const deliveryCard = (d) => h('div', { class: 'card', 'data-rid': String(d.id), style: { marginBottom: '12px' } }, h('div', { class: 'row between' }, h('div', {}, h('strong', {}, `${t('Livraison')} ${d.number}`), h('div', { class: 'muted' }, `${t('Commande')} ${d.order_number} · ${d.address}`)), badge(d.status_label, DKIND[d.status])), driverCard(d), timeline(d));
 
 export async function orders(body, reload) {
   await loadMethods('online'); const r = await get('/portal/orders'); const online = methodsNow().filter((m) => m.code);

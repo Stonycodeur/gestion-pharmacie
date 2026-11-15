@@ -1,0 +1,18 @@
+# Serveur (VPS) — SQLite, sans base séparée : application + Caddy (HTTPS automatique).
+# 1) cp deploy/env.render-sqlite.txt .env et remplir JWT_SECRET, SETUP_TOKEN, BACKUP_KEY, SMTP_PASS
+# 2) docker compose -f docker-compose.sqlite.yml up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment: { NODE_ENV: production, DB_DRIVER: sqlite, DB_FILE: /app/data/prod.sqlite, UPLOAD_DIR: /app/data/uploads, PORT: "3000" }
+    volumes: [pharma_data:/app/data]
+    expose: ["3000"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy_data:/data, caddy_config:/config]
+    depends_on: [app]
+volumes: { pharma_data: {}, caddy_data: {}, caddy_config: {} }
