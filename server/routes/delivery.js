@@ -10,7 +10,7 @@ import { normalizePhone, phoneFor } from '../phone.js';
 import { quoteFor, setAvailability, applyAffiliations, AFF, isAffiliated, driverPharmacies, standardFee, photoUrl, notifySupers } from './drivers.js';
 import { savePublicImage, savePrivate, dropPublic } from '../files.js';
 import { sendWelcome } from '../emailtpl.js';
-import { dlvConfig, priceFor, MODES, MODE_CODES, utc, saveConfig } from '../delivery_config.js';
+import { dlvConfig, priceFor, MODES, MODE_CODES, utc, saveConfig, acceptsMode } from '../delivery_config.js';
 import { haversineKm } from './discover.js';
 
 export const DSTATUS = { issued: 'Commande émise', received: 'Reçue par la pharmacie', in_progress: 'En cours de livraison', delivered: 'Livrée', failed: 'Échec de livraison', cancelled: 'Annulée' };
@@ -51,7 +51,7 @@ function create(ctx, order, b, userId) {
   if (!['preparing', 'ready'].includes(order.status)) throw conflict('BAD_STATE', 'Une livraison ne peut être demandée que lorsque la commande est au minimum « En préparation »');
   const mode = oneOf(b.mode || 'standard', 'mode de livraison', MODE_CODES), cfg = dlvConfig(order.pharmacy_id); let scheduledAt = null;
   if (mode === 'scheduled') { const dt = new Date(b.scheduled_at); if (!b.scheduled_at || Number.isNaN(dt.getTime())) throw bad('VALIDATION', 'Choisissez la date et l\'heure de la livraison programmée'); if (dt.getTime() < Date.now() + 20 * 60000) throw bad('VALIDATION', 'La livraison programmée doit être prévue dans au moins 20 minutes'); if (dt.getTime() > Date.now() + 60 * 86400000) throw bad('VALIDATION', 'La livraison programmée ne peut pas dépasser 60 jours'); scheduledAt = utc(dt); }
-  if (!b.driver_id && !all("SELECT d.id FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available'", order.pharmacy_id, order.pharmacy_id).length && mode !== 'scheduled') throw conflict('NO_DRIVER', 'Aucun chauffeur n\'est disponible actuellement dans le secteur');
+  if (!b.driver_id && mode !== 'scheduled' && !all("SELECT d.* FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available'", order.pharmacy_id, order.pharmacy_id).some((d) => acceptsMode(d, mode))) throw conflict('NO_DRIVER', all("SELECT 1 FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available'", order.pharmacy_id, order.pharmacy_id).length ? `Aucun chauffeur disponible n'a choisi le mode « ${MODES[mode].short} » : choisissez un autre mode` : 'Aucun chauffeur n\'est disponible actuellement dans le secteur');
   const address = str(b.address ?? order.delivery_address, 'adresse', { required: true, min: 5, max: 300 }), phone = phoneFor({ ph: order.pharmacy_id, user: {} }, b.phone, 'téléphone'), notes = str(b.notes, 'instructions', { max: 300 });
   const lat = b.lat === undefined || b.lat === null || b.lat === '' ? null : Number(b.lat), lng = b.lng === undefined || b.lng === null || b.lng === '' ? null : Number(b.lng);
   if ((lat !== null && !(lat >= -90 && lat <= 90)) || (lng !== null && !(lng >= -180 && lng <= 180)) || (lat === null) !== (lng === null)) throw bad('VALIDATION', 'Coordonnées de livraison invalides');
@@ -60,7 +60,7 @@ function create(ctx, order, b, userId) {
   if (km !== null && cfg.max_km > 0 && km > cfg.max_km) throw bad('TOO_FAR', `Adresse trop éloignée : la distance maximale de livraison est de ${cfg.max_km} km`);
   let fee = priceFor(cfg, mode, km);
   if (b.driver_id) {
-    const dr = get("SELECT d.* FROM drivers d WHERE d.id=? AND " + AFF + " AND d.status='active' AND d.availability='available'", int(b.driver_id, 'chauffeur'), order.pharmacy_id, order.pharmacy_id); if (!dr) throw conflict('DRIVER_UNAVAILABLE', 'Ce chauffeur n\'est plus disponible');
+    const dr = get("SELECT d.* FROM drivers d WHERE d.id=? AND " + AFF + " AND d.status='active' AND d.availability='available'", int(b.driver_id, 'chauffeur'), order.pharmacy_id, order.pharmacy_id); if (dr && !acceptsMode(dr, mode)) throw conflict('DRIVER_MODE', `Ce chauffeur n'a pas choisi le mode « ${MODES[mode].short} »`); if (!dr) throw conflict('DRIVER_UNAVAILABLE', 'Ce chauffeur n\'est plus disponible');
     q = quoteFor(dr, phRow, lat, lng); driverId = dr.id; standard = fee;
   } else { // course ouverte : proposée à tous les chauffeurs disponibles de la pharmacie, premier arrivé premier servi (ou choix du client parmi les offres)
     offerMode = 'open'; standard = fee; q = { distance_m: km === null ? null : Math.round(km * 1000), eta_min: null, eta_max: null };
@@ -71,7 +71,7 @@ function create(ctx, order, b, userId) {
   let d = get('SELECT * FROM deliveries WHERE id=?', id); addEvent(d, 'issued', null, userId);
   if (order.status === 'ready') { readyForDelivery(d, userId); d = get('SELECT * FROM deliveries WHERE id=?', id); } // commande déjà prête : le chauffeur part directement
   if (driverId) { const du = get('SELECT user_id FROM drivers WHERE id=?', driverId)?.user_id; if (du) notify({ pharmacyId: order.pharmacy_id, userId: du, kind: 'delivery', title: `Nouvelle course ${number}`, body: address, link: '#/driver' }); }
-  else for (const dr of all("SELECT d.user_id FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available' AND d.user_id IS NOT NULL", order.pharmacy_id, order.pharmacy_id)) notify({ pharmacyId: order.pharmacy_id, userId: dr.user_id, kind: 'delivery', title: `Nouvelle course proposée ${number}`, body: address, link: '#/driver' });
+  else for (const dr of all("SELECT d.user_id, d.accepted_modes FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available' AND d.user_id IS NOT NULL", order.pharmacy_id, order.pharmacy_id).filter((q) => acceptsMode(q, mode))) notify({ pharmacyId: order.pharmacy_id, userId: dr.user_id, kind: 'delivery', title: `Nouvelle course proposée ${number}`, body: address, link: '#/driver' });
   return d;
 }
 

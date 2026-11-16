@@ -213,3 +213,10 @@ Au premier lancement la base est vide : l'écran « Première configuration » c
 - **Une seule recherche par page** : la recherche intégrée des tableaux est masquée quand la page a déjà la sienne ; sinon une recherche « maîtresse » filtre tous les tableaux de la page. Recherche élargie côté serveur : ventes (n°, client, téléphone, caissier, mode de paiement, montant), ordonnances (n°, patient, prescripteur, statut), stock (code-barres partiel), utilisateurs (rôle), audit (entité, IP). Les filtres restent sur la même ligne que la recherche.
 - **Icône par défaut** aussi dans la liste des établissements, la fiche logo et les cartes pharmacies côté client.
 - Tests : `tests/views.test.js` (9 tests).
+
+## Modes de livraison choisis par le chauffeur
+
+- Quand le chauffeur se met « Disponible », une fenêtre lui fait choisir les modes qu'il accepte de recevoir : Économique, Standard, Express, Programmée — un, plusieurs ou tous (au moins un). Les modes reçus s'affichent sous le bouton avec « Modifier » (changeable à tout moment).
+- Une course n'est proposée qu'aux chauffeurs ayant choisi son mode : liste des offres, notification « Nouvelle course », acceptation / contre-proposition (refus 403 explicite), liste des chauffeurs affectables par l'administration. Un client ne peut pas demander un mode (hors programmée) si aucun chauffeur disponible ne l'a choisi (message dédié) ; l'affectation manuelle d'un chauffeur qui n'a pas choisi le mode est refusée.
+- Données : colonne `drivers.accepted_modes` (migration 023, MariaDB incluse ; défaut = tous les modes, comportement inchangé pour les comptes existants). `PUT /driver/me { accepted_modes:[…] }` ; sans précision à la mise en disponibilité (ancien client), les derniers modes enregistrés sont conservés. La liste admin des chauffeurs affiche la colonne « Modes reçus ».
+- Test : `tests/views.test.js` (10 tests).

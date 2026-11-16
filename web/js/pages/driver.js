@@ -9,6 +9,8 @@ import { t } from '../i18n.js';
 import { avatar, callBtn, partiesCard, chatModal, rateModal, reportModal } from './delivery_common.js';
 
 const AV = { offline: ['Hors ligne', ''], available: ['Disponible', 'ok'], busy: ['En course', 'warn'] };
+const MODE_INFO = { economy: ['Économique', 'Groupage possible, prix le plus bas'], standard: ['Standard', 'Livraison directe, chauffeur le plus proche'], express: ['Express', 'Urgente : priorité maximale, aucune autre mission'], scheduled: ['Programmée', 'À une date et une heure choisies, rappel envoyé'] };
+const MODE_ORDER = ['economy', 'standard', 'express', 'scheduled'];
 const ST = { issued: 'Émise', received: 'Reçue', in_progress: 'En cours', delivered: 'Livrée', failed: 'Échec', cancelled: 'Annulée' };
 let watch = null, lastSent = 0, lastPos = null;
 const fm = (n, o) => `${(n / 10 ** (o.decimals ?? 0)).toLocaleString(undefined, { minimumFractionDigits: o.decimals ?? 0, maximumFractionDigits: o.decimals ?? 0 })} ${o.currency || ''}`.trim();
@@ -23,6 +25,15 @@ const postQueuedLoc = async (c) => { try { await post('/driver/location', { lat:
 export default async function (box) {
   const root = h('div'); box.append(h('h1', {}, 'Espace chauffeur'), root); let me, busy = false;
   const act = (fn) => async () => { try { await fn(); } catch (e) { fail(e); } };
+  // Choix des modes de livraison à recevoir (un, plusieurs ou tous). Obligatoire pour passer « Disponible » : une course n'est proposée qu'aux chauffeurs ayant choisi son mode.
+  const modesModal = (current, goOnline) => new Promise((res) => {
+    const sel = new Set(current?.length ? current : MODE_ORDER), boxes = {};
+    const row = (m) => h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '10px 0', borderBottom: '1px solid var(--line)', cursor: 'pointer' } }, boxes[m] = h('input', { type: 'checkbox', checked: sel.has(m), style: { width: 'auto', flex: 'none', marginTop: '3px' }, onchange: (e) => { e.target.checked ? sel.add(m) : sel.delete(m); ok.disabled = !sel.size; } }), h('span', { style: { flex: 1, minWidth: 0 } }, h('strong', {}, t(MODE_INFO[m][0])), h('div', { class: 'muted' }, t(MODE_INFO[m][1]))));
+    const ok = h('button', { class: 'btn primary', onclick: () => { if (!sel.size) return; res([...sel]); box.close(); } }, goOnline ? t('Passer disponible') : t('Enregistrer'));
+    const all = h('button', { class: 'btn sm', type: 'button', onclick: () => { for (const m of MODE_ORDER) { sel.add(m); boxes[m].checked = true; } ok.disabled = false; } }, t('Tout sélectionner'));
+    const box = modal(t('Modes de livraison que vous acceptez'), h('div', {}, h('p', { class: 'muted' }, t('Choisissez un, plusieurs ou tous les modes. Vous ne recevrez que les courses de ces modes (une demande Express, par exemple, ne vous sera pas proposée si vous ne l\'avez pas choisi).')), ...MODE_ORDER.map(row), h('div', { class: 'row between', style: { marginTop: '12px' } }, all, ok)), { onClose: () => res(null) });
+  });
+  const goOnline = async () => { const m = await modesModal(me.modes, true); if (!m) return; await put('/driver/me', { availability: 'available', accepted_modes: m }); if (!watch) startGps(); draw(); };
   const draw = async (silent = false) => {
     if (busy) return; busy = true;
     try {
@@ -32,7 +43,8 @@ export default async function (box) {
       root.append(h('div', { class: 'grid g2' },
         h('div', { class: 'card' }, h('div', { class: 'offer' }, h('button', { class: 'linklike', type: 'button', 'aria-label': 'Changer ma photo de profil', onclick: () => photoModal() }, avatar(me.photo_url, me.name, 64)), h('div', { style: { flex: 1 } }, h('h2', { style: { margin: 0 } }, me.name), h('div', { class: 'muted' }, `${me.vehicle_type} · ${me.plate || me.matricule}`), h('div', {}, stars(me.rating), me.rating_count ? h('small', { class: 'muted' }, ` (${me.rating_count} avis)`) : null)), badge(avl, avk)),
           !me.photo_url || !me.has_id_doc ? h('p', { class: 'muted' }, icon('info', { size: 14 }), ' Complétez votre profil : ', !me.photo_url ? 'photo de profil ' : '', !me.has_id_doc ? 'pièce d\'identité' : '') : null,
-          h('div', { class: 'seg', style: { margin: '12px 0' } }, ...['offline', 'available'].map((v) => h('button', { class: 'btn' + (me.availability === v ? ' primary' : ''), disabled: me.availability === 'busy', onclick: act(async () => { await put('/driver/me', { availability: v }); if (v === 'available' && !gpsOn) startGps(); if (v === 'offline') stopGps(); draw(); }) }, v === 'offline' ? 'Hors ligne' : 'Disponible'))),
+          h('div', { class: 'seg', style: { margin: '12px 0' } }, ...['offline', 'available'].map((v) => h('button', { class: 'btn' + (me.availability === v ? ' primary' : ''), disabled: me.availability === 'busy', onclick: act(async () => { if (v === 'available') { if (me.availability === 'available') return; return goOnline(); } await put('/driver/me', { availability: v }); stopGps(); draw(); }) }, v === 'offline' ? 'Hors ligne' : 'Disponible'))),
+          h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px' } }, h('small', { class: 'muted' }, t('Modes reçus') + ' :'), ...(me.modes || MODE_ORDER).map((m) => badge(t(MODE_INFO[m][0]), 'info')), h('button', { class: 'btn sm', type: 'button', onclick: act(async () => { const m = await modesModal(me.modes, false); if (!m) return; await put('/driver/me', { accepted_modes: m }); toast(t('Modes enregistrés')); draw(); }) }, icon('sliders', { size: 14 }), t('Modifier'))),
           h('label', { class: 'row', style: { gap: '8px' } }, h('input', { type: 'checkbox', checked: gpsOn, style: { width: 'auto' }, onchange: (e) => { e.target.checked ? startGps() : stopGps(); } }), 'Partager ma position en temps réel'),
           h('p', { class: 'muted' }, 'Gardez cette page ouverte pendant vos courses : la position est envoyée toutes les 5 secondes.'),
           h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => photoModal() }, icon('image', { size: 14 }), 'Photo de profil'), h('button', { class: 'btn sm', onclick: () => idModal() }, icon('file', { size: 14 }), me.has_id_doc ? 'Pièce d\'identité (remplacer)' : 'Déposer ma pièce d\'identité'), me.has_id_doc ? h('button', { class: 'btn sm', onclick: act(() => previewFile({ name: 'Pièce d\'identité', mime: 'image/jpeg' }, '/driver/me/id-doc')) }, 'Voir') : null)),

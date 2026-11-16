@@ -160,3 +160,21 @@ test('exports : sous-titre (page › vue), logo par défaut, Excel filtrable/tri
   const all = (await (await fetch(base + '/sales?limit=5', { headers: { authorization: 'Bearer ' + tok } })).json()); const first = (all.data || [])[0];
   if (first) { const q = await (await fetch(base + '/sales?q=' + encodeURIComponent(first.cashier_name), { headers: { authorization: 'Bearer ' + tok } })).json(); assert.ok((q.data || []).some((r) => r.id === first.id), 'recherche par caissier'); }
 });
+
+test('chauffeur : modes de livraison choisis à la mise en disponibilité ; une course n\'est proposée qu\'aux chauffeurs ayant choisi son mode', async () => {
+  const adm = await login('admin'); const a = await mkDriver(adm, '2'), b = await mkDriver(adm, '3');
+  assert.deepEqual((await call('GET', '/driver/me', null, a.t)).body.modes, ['economy', 'standard', 'express', 'scheduled'], 'par défaut : tous les modes'); assert.equal((await call('PUT', '/driver/me', { availability: 'available', accepted_modes: [] }, a.t)).status, 400); assert.equal((await call('PUT', '/driver/me', { availability: 'available', accepted_modes: ['bidon'] }, a.t)).status, 400);
+  assert.equal((await call('PUT', '/driver/me', { availability: 'available', accepted_modes: ['standard'] }, a.t)).status, 200); assert.deepEqual((await call('GET', '/driver/me', null, a.t)).body.modes, ['standard']);
+  assert.equal((await call('PUT', '/driver/me', { availability: 'available', accepted_modes: ['standard', 'express', 'economy', 'scheduled'] }, b.t)).status, 200);
+  assert.deepEqual((await call('GET', '/driver/me', null, b.t)).body.modes, ['economy', 'standard', 'express', 'scheduled']);
+  const { run } = await import('../server/db.js'); run("UPDATE drivers SET availability='offline' WHERE id != ?", a.id); // seul A (standard) est disponible
+  const o1 = await customerOrder('x1'); const ex = await call('POST', `/portal/orders/${o1.id}/delivery`, { address: '12 rue des Oliviers, Tunis', phone: '98123456', lat: 36.85, lng: 10.25, mode: 'express' }, o1.t);
+  assert.equal(ex.status, 409, JSON.stringify(ex.body)); assert.match(ex.body.error.message, /Express/);
+  const st = await call('POST', `/portal/orders/${o1.id}/delivery`, { address: '12 rue des Oliviers, Tunis', phone: '98123456', lat: 36.85, lng: 10.25, mode: 'standard' }, o1.t); assert.equal(st.status, 201, JSON.stringify(st.body));
+  run("UPDATE drivers SET availability='available' WHERE id=?", b.id); const o2 = await customerOrder('x2');
+  const e2 = await call('POST', `/portal/orders/${o2.id}/delivery`, { address: '14 rue des Oliviers, Tunis', phone: '98123456', lat: 36.85, lng: 10.25, mode: 'express' }, o2.t); assert.equal(e2.status, 201, JSON.stringify(e2.body));
+  const ids = async (t) => (await call('GET', '/driver/offers', null, t)).body.data.map((x) => x.id);
+  assert.ok((await ids(a.t)).includes(st.body.id) && !(await ids(a.t)).includes(e2.body.id), 'A ne voit pas l\'Express'); assert.ok((await ids(b.t)).includes(e2.body.id) && (await ids(b.t)).includes(st.body.id));
+  const acc = await call('POST', `/driver/offers/${e2.body.id}/accept`, {}, a.t); assert.equal(acc.status, 403); assert.match(acc.body.error.message, /Express/);
+  assert.equal((await call('POST', `/driver/offers/${e2.body.id}/accept`, {}, b.t)).status, 200);
+});

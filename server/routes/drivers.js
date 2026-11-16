@@ -6,7 +6,7 @@ import { bad, conflict, notFound, forbidden, str, int, oneOf, nowSql } from '../
 import { haversineKm } from './discover.js';
 import { phoneFor } from '../phone.js';
 import { savePrivate, readPrivate, mimeOfName } from '../files.js';
-import { dlvConfig, saveConfig, modesView, MODES, MODE_CODES } from '../delivery_config.js';
+import { dlvConfig, saveConfig, modesView, MODES, MODE_CODES, driverModes } from '../delivery_config.js';
 
 const ROAD = 1.3; // facteur routier appliqué à la distance à vol d'oiseau
 const OWNC = '(SELECT id FROM customers WHERE user_id=?)';
@@ -53,7 +53,7 @@ export function applyAffiliations(ctx, driverId, list, { replace = false } = {})
 export const photoUrl = (d) => (d.photo_file ? `/api/v1/public/file/${d.photo_file}` : null);
 const me = (ctx) => { const d = get("SELECT * FROM drivers WHERE user_id=? AND status='active'", ctx.user.id); if (!d) throw notFound('Profil chauffeur'); return d; };
 const rating = (d) => (d.rating_count ? Math.round((d.rating_sum / d.rating_count) * 10) / 10 : null);
-const pubDriver = (d) => ({ id: d.id, photo_url: photoUrl(d), name: d.name, vehicle_type: d.vehicle_type, vehicle: d.vehicle, plate: d.plate, rating: rating(d), rating_count: d.rating_count });
+const pubDriver = (d) => ({ id: d.id, modes: driverModes(d), photo_url: photoUrl(d), name: d.name, vehicle_type: d.vehicle_type, vehicle: d.vehicle, plate: d.plate, rating: rating(d), rating_count: d.rating_count });
 
 // ---- devis (client) : les 4 modes (prix + délai), chauffeurs disponibles autour de la pharmacie (temps d'arrivée, distances), éligibilité de la demande ----
 router.get('/portal/orders/:id/delivery-quote', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => {
@@ -77,7 +77,7 @@ router.put('/delivery-config', { perm: 'settings.manage' }, (ctx) => { const bef
 // ---- espace chauffeur ----
 router.get('/driver/me', { perm: 'driver.use', needsPharmacy: false }, (ctx) => {
   const d = me(ctx); const { user_id, ...rest } = d;
-  return { ...rest, rating: rating(d), pharmacy: get('SELECT id,name,lat,lng FROM pharmacies WHERE id=?', d.pharmacy_id), pharmacies: driverPharmacies(d), photo_url: photoUrl(d), has_id_doc: !!d.id_doc_file, id_doc_file: undefined, photo_file: undefined, active: all("SELECT id FROM deliveries WHERE driver_id=? AND status IN ('issued','received','in_progress')", d.id).length };
+  return { ...rest, modes: driverModes(d), rating: rating(d), pharmacy: get('SELECT id,name,lat,lng FROM pharmacies WHERE id=?', d.pharmacy_id), pharmacies: driverPharmacies(d), photo_url: photoUrl(d), has_id_doc: !!d.id_doc_file, id_doc_file: undefined, photo_file: undefined, active: all("SELECT id FROM deliveries WHERE driver_id=? AND status IN ('issued','received','in_progress')", d.id).length };
 });
 // « Mes tarifs » : les 4 modes de livraison réglés par l'administrateur de chaque pharmacie du chauffeur (lecture seule).
 router.get('/driver/tariffs', { perm: 'driver.use', needsPharmacy: false }, (ctx) => {
@@ -92,6 +92,8 @@ router.put('/driver/me', { perm: 'driver.use', needsPharmacy: false, ok200: true
     if (u.availability === 'offline' && get("SELECT 1 FROM deliveries WHERE driver_id=? AND status='in_progress'", d.id)) throw conflict('IN_USE', 'Course en cours : terminez-la avant de vous mettre hors ligne');
     if (u.availability === 'available' && get("SELECT 1 FROM deliveries WHERE driver_id=? AND status='in_progress'", d.id)) throw conflict('IN_USE', 'Course en cours');
   }
+  // Modes de livraison que le chauffeur accepte de recevoir : au moins un (un, plusieurs ou tous). L'écran du chauffeur impose ce choix à chaque mise en disponibilité ; sans précision (ancien client), les derniers modes enregistrés sont conservés.
+  if (b.accepted_modes !== undefined) { const m = [...new Set(Array.isArray(b.accepted_modes) ? b.accepted_modes : [])]; if (!m.length || m.some((x) => !MODE_CODES.includes(x))) throw bad('VALIDATION', 'Choisissez au moins un mode de livraison'); u.accepted_modes = MODE_CODES.filter((x) => m.includes(x)).join(','); }
   if (b.base_fee !== undefined || b.per_km !== undefined) throw forbidden('Le prix de base et le prix au kilomètre sont fixés par l\'administrateur');
   if (b.home_address !== undefined) u.home_address = str(b.home_address, 'adresse', { max: 200 });
   if (b.wait_min !== undefined) u.wait_min = Math.min(480, Math.max(0, Number(b.wait_min) || 0));

@@ -46,6 +46,7 @@ const MIGRATIONS = [
   { name: '020_file_manager', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/020_file_manager.sql'), 'utf8') },
   { name: '021_country_methods', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/021_country_methods.sql'), 'utf8') },
   { name: '022_delivery_modes', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/022_delivery_modes.sql'), 'utf8') },
+  { name: '023_driver_modes', inBaseline: true, sql: () => readFileSync(resolve(here, 'migrations/023_driver_modes.sql'), 'utf8') },
 ];
 // Scripts MariaDB d'évolution (générés par tools/gen-mariadb.js) pour une base déjà installée avec une version plus ancienne
 for (const m of MIGRATIONS) { const f = resolve(here, '../database/mariadb/migrations', m.name + '.sql'); if (existsSync(f)) m.mariadb = () => readFileSync(f, 'utf8'); }

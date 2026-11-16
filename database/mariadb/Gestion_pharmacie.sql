@@ -734,7 +734,8 @@ CREATE TABLE `drivers` (
   `id_doc_file` VARCHAR(255),
   `id_doc_type` VARCHAR(255),
   `id_doc_number` VARCHAR(255),
-  `home_address` VARCHAR(255)
+  `home_address` VARCHAR(255),
+  `accepted_modes` VARCHAR(255) NOT NULL DEFAULT 'economy,standard,express,scheduled'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `deliveries` (

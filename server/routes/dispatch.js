@@ -4,7 +4,7 @@ import { router, audit, notify, publish, can } from '../http.js';
 import { get, all, run, insert, tx } from '../db.js';
 import { bad, conflict, notFound, forbidden, str, int, oneOf } from '../util.js';
 import { haversineKm } from './discover.js';
-import { dlvConfig, negotiationRange, MODES } from '../delivery_config.js';
+import { dlvConfig, negotiationRange, MODES, acceptsMode } from '../delivery_config.js';
 import { AFF, isAffiliated, driverPharmacies, standardFee, photoUrl, notifySupers, applyAffiliations, setAvailability } from './drivers.js';
 import { savePublicImage, dropPublic, savePrivate, readPrivate, mimeOfName } from '../files.js';
 
@@ -52,7 +52,7 @@ router.get('/driver/offers', { perm: 'driver.use', needsPharmacy: false }, (ctx)
     WHERE x.driver_id IS NULL AND x.offer_mode='open' AND x.status IN ('issued','received')
       AND (x.pharmacy_id=? OR x.pharmacy_id IN (SELECT pharmacy_id FROM driver_pharmacies WHERE driver_id=?))
       AND ${hidden ? '' : 'NOT '}EXISTS (SELECT 1 FROM delivery_offers o WHERE o.delivery_id=x.id AND o.driver_id=? AND o.status='withdrawn')
-    ORDER BY x.id DESC LIMIT 50`, d.pharmacy_id, d.id, d.id);
+    ORDER BY x.id DESC LIMIT 50`, d.pharmacy_id, d.id, d.id).filter((x) => acceptsMode(d, x.mode)); // seuls les modes choisis par le chauffeur
   const deps = driverPharmacies(d);
   return { available: true, data: rows.map((x) => {
     const std = modeStd(x, d, { lat: x.pharmacy_lat, lng: x.pharmacy_lng }), dep = deps.find((q) => q.id === x.pharmacy_id), from = d.lat != null ? { lat: d.lat, lng: d.lng } : dep?.depart_lat != null ? { lat: dep.depart_lat, lng: dep.depart_lng } : null;
@@ -68,6 +68,7 @@ const modeStd = (x, d, ph) => (x.standard_fee > 0 ? { fee: x.standard_fee, dista
 router.post('/driver/offers/:id/accept', { perm: 'driver.use', needsPharmacy: false, ok200: true }, (ctx) => tx(() => {
   const d = meDriver(ctx); const x = get("SELECT * FROM deliveries WHERE id=? AND offer_mode='open' AND status IN ('issued','received')", ctx.params.id); if (!x) throw notFound('Course');
   if (!isAffiliated(d, x.pharmacy_id)) throw forbidden('Vous n\'êtes pas affecté à cette pharmacie'); if (d.availability !== 'available' && !(d.availability === 'busy' && x.mode === 'economy')) throw conflict('NOT_AVAILABLE', x.mode === 'economy' ? 'Passez en « Disponible » ou « Occupé » pour accepter cette course économique' : 'Passez en « Disponible » pour accepter une course');
+  if (!acceptsMode(d, x.mode)) throw forbidden(`Vous n'avez pas choisi le mode « ${MODES[x.mode]?.short || x.mode} » : activez-le dans vos modes de livraison`);
   if (x.driver_id) throw conflict('TAKEN', 'Cette course vient d\'être prise par un autre chauffeur');
   if (get("SELECT 1 FROM delivery_offers WHERE delivery_id=? AND driver_id=? AND status='rejected'", x.id, d.id)) throw conflict('REFUSED', 'Le client a refusé votre proposition pour cette course');
   const ph = get('SELECT id,name,lat,lng,currency,currency_decimals FROM pharmacies WHERE id=?', x.pharmacy_id), std = modeStd(x, d, ph), cu = custUser(x);
@@ -117,7 +118,7 @@ const pubOffer = (o, d, ph) => ({ id: o.id, driver_id: d.id, driver: { name: d.n
 router.get('/portal/deliveries/:id/offers', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false }, (ctx) => {
   const x = ownDelivery(ctx, ctx.params.id), ph = get('SELECT id,name,lat,lng,currency,currency_decimals FROM pharmacies WHERE id=?', x.pharmacy_id);
   const offers = all("SELECT o.*, d.name,d.photo_file,d.vehicle_type,d.vehicle,d.plate,d.rating_sum,d.rating_count,d.id did FROM delivery_offers o JOIN drivers d ON d.id=o.driver_id WHERE o.delivery_id=? AND o.status IN ('pending','chosen') ORDER BY o.price", x.id).map((o) => pubOffer(o, { ...o, id: o.did }, ph));
-  const free = all("SELECT d.* FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available'", x.pharmacy_id, x.pharmacy_id).filter((d) => !offers.some((o) => o.driver_id === d.id) && !get("SELECT 1 FROM delivery_offers WHERE delivery_id=? AND driver_id=? AND status IN ('withdrawn','rejected')", x.id, d.id)).map((d) => ({ driver_id: d.id, driver: { name: d.name, photo_url: photoUrl(d), vehicle_type: d.vehicle_type, plate: d.plate, rating: d.rating_count ? Math.round((d.rating_sum / d.rating_count) * 10) / 10 : null, rating_count: d.rating_count }, price: standardFee(d, ph, x.dest_lat, x.dest_lng).fee, currency: ph.currency, decimals: ph.currency_decimals }));
+  const free = all("SELECT d.* FROM drivers d WHERE " + AFF + " AND d.status='active' AND d.availability='available'", x.pharmacy_id, x.pharmacy_id).filter((d) => acceptsMode(d, x.mode)).filter((d) => !offers.some((o) => o.driver_id === d.id) && !get("SELECT 1 FROM delivery_offers WHERE delivery_id=? AND driver_id=? AND status IN ('withdrawn','rejected')", x.id, d.id)).map((d) => ({ driver_id: d.id, driver: { name: d.name, photo_url: photoUrl(d), vehicle_type: d.vehicle_type, plate: d.plate, rating: d.rating_count ? Math.round((d.rating_sum / d.rating_count) * 10) / 10 : null, rating_count: d.rating_count }, price: standardFee(d, ph, x.dest_lat, x.dest_lng).fee, currency: ph.currency, decimals: ph.currency_decimals }));
   return { delivery: { id: x.id, status: x.status, offer_mode: x.offer_mode, fee: x.fee, driver_id: x.driver_id, driver_response: x.driver_response }, offers, available: free };
 });
 router.post('/portal/deliveries/:id/choose', { anyPerm: ['portal.use', 'portal.guest'], needsPharmacy: false, ok200: true }, (ctx) => tx(() => {

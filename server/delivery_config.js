@@ -9,6 +9,9 @@ export const MODES = {
   scheduled: { label: 'Livraison Programmée', short: 'Programmée', hint: 'Vous choisissez la date et l\'heure ; le chauffeur est réservé et un rappel est envoyé.', eta: [0, 0], base: [2000, 2] },
 };
 export const MODE_CODES = Object.keys(MODES);
+// Modes de livraison que le chauffeur a choisi de recevoir (un, plusieurs ou tous). Une course n'est proposée qu'aux chauffeurs ayant choisi son mode.
+export const driverModes = (d) => { const l = String(d?.accepted_modes ?? '').split(',').map((x) => x.trim()).filter((x) => MODE_CODES.includes(x)); return l.length ? l : [...MODE_CODES]; };
+export const acceptsMode = (d, mode) => driverModes(d).includes(mode || 'standard');
 const num = (v, lo, hi, d) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d; };
 
 export function dlvConfig(pharmacyId) {
