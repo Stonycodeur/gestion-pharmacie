@@ -50,6 +50,22 @@ router.get('/reports/tax', { perm: 'accounting.view' }, (ctx) => { const { from,
   const r = all(`SELECT l.tax_rate, SUM(l.line_total * (l.qty - l.qty_refunded) / l.qty) ttc FROM sale_lines l JOIN sales s ON s.id=l.sale_id WHERE s.pharmacy_id=? AND s.created_at BETWEEN ? AND ? GROUP BY l.tax_rate`, ctx.ph, from, to)
     .map((x) => { const ttc = Math.round(x.ttc), ht = Math.round(ttc / (1 + x.tax_rate / 100)); return { tax_rate: x.tax_rate, ttc, ht, tax: ttc - ht }; }); return out(ctx, 'taxes', r, ['tax_rate', 'ht', 'tax', 'ttc']); });
 
+// Analyse : indicateurs avec comparaison à la période précédente, courbe, heures de pointe, jours, paiements, meilleures ventes
+router.get('/reports/analytics', { perm: 'reports.view' }, (ctx) => {
+  const { from, to } = range(ctx.query), ph = ctx.ph, group = ctx.query.group === 'month' ? 'month' : 'day';
+  const d0 = new Date(from + 'T00:00:00Z'), d1 = new Date(to.slice(0, 10) + 'T00:00:00Z'), days = Math.max(1, Math.round((d1 - d0) / 864e5) + 1);
+  const pTo = addDays(from, -1).slice(0, 10), pFrom = addDays(from, -days).slice(0, 10);
+  const kp = (a, b) => { const r = salesRows(ph, a, b, 'day'); const sum = (k) => r.reduce((x, y) => x + (y[k] || 0), 0); const net = sum('net'), tickets = sum('tickets'), margin = sum('margin');
+    return { net, tickets, margin, refunded: sum('refunded'), discount: sum('discount'), basket: tickets ? Math.round((net) / tickets) : 0, days_active: r.length }; };
+  const cur = kp(from, to), prev = kp(pFrom, pTo + ' 23:59:59');
+  const series = salesRows(ph, from, to, group), seriesPrev = salesRows(ph, pFrom, pTo + ' 23:59:59', group);
+  const hours = all(`SELECT strftime('%H', s.created_at) h, COUNT(*) tickets, SUM(s.total) total FROM sales s WHERE s.pharmacy_id=? AND s.created_at BETWEEN ? AND ? GROUP BY h ORDER BY h`, ph, from, to).map((x) => ({ hour: Number(x.h), tickets: x.tickets, total: x.total || 0 }));
+  const weekdays = all(`SELECT strftime('%w', s.created_at) w, COUNT(*) tickets, SUM(s.total) total FROM sales s WHERE s.pharmacy_id=? AND s.created_at BETWEEN ? AND ? GROUP BY w ORDER BY w`, ph, from, to).map((x) => ({ day: Number(x.w), tickets: x.tickets, total: x.total || 0 }));
+  const payments = all(`SELECT p.method, SUM(p.amount) total, COUNT(*) n FROM payments p JOIN sales s ON s.id=p.sale_id WHERE s.pharmacy_id=? AND p.created_at BETWEEN ? AND ? GROUP BY p.method ORDER BY total DESC`, ph, from, to);
+  const top = all(`SELECT p.name, SUM(l.qty - l.qty_refunded) qty, SUM(l.line_total * (l.qty - l.qty_refunded) / l.qty) revenue FROM sale_lines l JOIN sales s ON s.id=l.sale_id JOIN products p ON p.id=l.product_id WHERE s.pharmacy_id=? AND s.created_at BETWEEN ? AND ? GROUP BY p.id ORDER BY revenue DESC LIMIT 8`, ph, from, to).map((x) => ({ ...x, revenue: Math.round(x.revenue) }));
+  return { from, to: to.slice(0, 10), days, previous: { from: pFrom, to: pTo }, current: cur, prev, series, series_prev: seriesPrev, hours, weekdays, payments, top };
+});
+
 router.get('/dashboard', { perm: 'dashboard.view' }, (ctx) => {
   const ph = ctx.ph, today = todaySql(), month = today.slice(0, 7) + '-01';
   const sum = (from) => get(`SELECT COALESCE(SUM(total),0) total, COUNT(*) n FROM sales WHERE pharmacy_id=? AND created_at >= ?`, ph, from);

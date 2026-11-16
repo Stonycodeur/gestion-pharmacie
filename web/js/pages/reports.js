@@ -1,11 +1,13 @@
 import { get, can, download, qs } from '../api.js';
 import { h, clear, money, table, badge, fail, tabs, barChart, when } from '../ui.js';
 import { t } from '../i18n.js';
+import { analytics } from './reports_analytics.js';
 
 export default async function (box) {
   const today = new Date().toISOString().slice(0, 10), from = h('input', { type: 'date', value: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10), 'aria-label': 'Du' }), to = h('input', { type: 'date', value: today, 'aria-label': 'Au' });
-  let tab = 'sales'; const head = h('div'), body = h('div'), exp = h('button', { class: 'btn' }, t('Exporter CSV')), expX = h('button', { class: 'btn' }, 'Excel'), expP = h('button', { class: 'btn' }, 'PDF');
+  const arrow = h('span', {}, '→'), dates = h('span', { class: 'row' }, from, arrow, to); let tab = 'analysis'; const head = h('div'), body = h('div'), exp = h('button', { class: 'btn' }, t('Exporter CSV')), expX = h('button', { class: 'btn' }, 'Excel'), expP = h('button', { class: 'btn' }, 'PDF');
   const R = {
+    analysis: ['Analyse', null, null],
     sales: ['Ventes', '/reports/sales', async (r) => [barChart(r.data.map((x) => ({ period: x.period, net: x.net }))), table([{ label: 'Période', key: 'period' }, { label: 'Tickets', num: true, key: 'tickets' }, { label: 'Brut', num: true, render: (x) => money(x.gross) }, { label: 'Remises', num: true, render: (x) => money(x.discount) }, { label: 'Remboursé', num: true, render: (x) => money(x.refunded) }, { label: 'Net', num: true, render: (x) => money(x.net) }, { label: 'Taxes', num: true, render: (x) => money(x.tax) }, { label: 'Marge HT', num: true, render: (x) => (x.margin != null ? money(x.margin) : '') }], r.data)] ],
     payments: ['Paiements', '/reports/payments', async (r) => table([{ label: 'Mode', key: 'method' }, { label: 'Opérations', num: true, key: 'n' }, { label: 'Total', num: true, render: (x) => money(x.total) }], r.data)],
     top: ['Produits', '/reports/top-products', async (r) => table([{ label: 'Réf.', key: 'sku' }, { label: 'Produit', key: 'name' }, { label: 'Quantité', num: true, key: 'qty' }, { label: 'CA TTC', num: true, render: (x) => money(x.revenue) }], r.data)],
@@ -16,8 +18,8 @@ export default async function (box) {
   };
   if (can('accounting.view')) R.tax = ['Taxes', '/reports/tax', async (r) => table([{ label: 'Taux %', num: true, key: 'tax_rate' }, { label: 'HT', num: true, render: (x) => money(x.ht) }, { label: 'Taxe', num: true, render: (x) => money(x.tax) }, { label: 'TTC', num: true, render: (x) => money(x.ttc) }], r.data)];
   const params = () => qs({ from: from.value, to: to.value });
-  async function show(id) { tab = id; clear(head).append(tabs(Object.entries(R).map(([k, v]) => [k, v[0]]), tab, show)); clear(body).append(h('div', { class: 'empty' }, t('Chargement…'))); try { const r = await get(R[tab][1] + params()); clear(body).append(...[].concat(await R[tab][2](r))); } catch (e) { clear(body); fail(e); } }
+  async function show(id) { tab = id; clear(head).append(tabs(Object.entries(R).map(([k, v]) => [k, v[0]]), tab, show)); dates.style.display = tab === 'analysis' ? 'none' : ''; for (const b of [exp, expX, expP]) b.style.display = tab === 'analysis' || !can('reports.export') ? 'none' : ''; for (const b of []) b.style.visibility = tab === 'analysis' ? 'hidden' : ''; if (tab === 'analysis') { clear(body); try { await analytics(body); } catch (e) { fail(e); } return; } clear(body).append(h('div', { class: 'empty' }, t('Chargement…'))); try { const r = await get(R[tab][1] + params()); clear(body).append(...[].concat(await R[tab][2](r))); } catch (e) { clear(body); fail(e); } }
   for (const [b, f, ext] of [[exp, 'csv', 'csv'], [expX, 'xlsx', 'xlsx'], [expP, 'pdf', 'pdf']]) { b.style.display = can('reports.export') ? '' : 'none'; b.onclick = () => download(R[tab][1] + params() + (params() ? '&' : '?') + 'format=' + f, `${tab}.${ext}`).catch(fail); }
-  from.onchange = to.onchange = () => show(tab);
-  box.append(h('h1', {}, t('Rapports')), h('div', { class: 'row', style: { margin: '8px 0 14px' } }, from, '→', to, exp, expX, expP), head, body); await show('sales');
+  from.onchange = to.onchange = () => { if (tab !== 'analysis') show(tab); };
+  box.append(h('h1', {}, t('Rapports')), h('div', { class: 'row', style: { margin: '8px 0 14px' } }, dates, exp, expX, expP), head, body); await show('analysis');
 }

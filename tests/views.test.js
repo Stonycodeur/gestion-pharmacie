@@ -110,3 +110,13 @@ test('reprise de session sans 401 (/auth/session) et pièce d\'identité PDF/PNG
     const adminView = await call('GET', `/drivers/${d.id}/id-doc`, null, adm); assert.equal(adminView.status, 200); assert.equal(adminView.headers.get('content-type'), mime); assert.ok(adminView.raw.length > 20);
   }
 });
+
+test('rapports : analyse (indicateurs, comparaison, heures, jours) et flux /events ouvert à tout compte connecté (plus de 403 en boucle)', async () => {
+  const adm = await login('admin'); const r = await call('GET', '/reports/analytics?group=day', null, adm); assert.equal(r.status, 200, JSON.stringify(r.body));
+  for (const k of ['current', 'prev', 'series', 'series_prev', 'hours', 'weekdays', 'payments', 'top']) assert.ok(k in r.body, k);
+  assert.ok(r.body.days >= 1 && r.body.previous.to < r.body.from); assert.equal((await call('GET', '/reports/analytics?group=month', null, adm)).status, 200);
+  const cl = await login('client'); assert.equal((await call('GET', '/reports/analytics', null, cl)).status, 403);
+  const p = await call('PUT', '/me/preferences', { reports_ui: { widgets: ['kpis', 'trend', 'bogus'], chart: 'line', metric: 'margin', range: 90 } }, adm); assert.equal(p.status, 200); assert.deepEqual(p.body.reports_ui.widgets, ['kpis', 'trend']); assert.equal(p.body.reports_ui.chart, 'line');
+  const d = await mkDriver(adm, '6');
+  for (const tk of [d.t, cl, adm]) { const ac = new AbortController(); const res = await fetch(base + '/events', { headers: { authorization: 'Bearer ' + tk }, signal: ac.signal }); assert.equal(res.status, 200); ac.abort(); }
+});

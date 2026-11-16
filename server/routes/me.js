@@ -14,6 +14,7 @@ export function cleanPrefs(b) {
     else if (k === 'accent') { if (v !== null && !/^#[0-9a-fA-F]{6}$/.test(String(v))) throw bad('VALIDATION', 'Couleur invalide'); o.accent = v; }
     else if (k === 'font') { const n = Number(v); if (!(n >= 85 && n <= 130)) throw bad('VALIDATION', 'Taille de texte invalide'); o.font = n; }
     else if (k === 'home_widgets') { if (!Array.isArray(v) || v.length > 12 || v.some((x) => !WIDGETS.includes(x))) throw bad('VALIDATION', 'Blocs invalides'); o.home_widgets = [...new Set(v)]; } // ordre = ordre d'affichage ; absent = masqué
+    else if (k === 'reports_ui') { if (!v || typeof v !== 'object') throw bad('VALIDATION', 'Rapports invalides'); const W = ['kpis', 'trend', 'hours', 'weekdays', 'payments', 'top']; o.reports_ui = { widgets: Array.isArray(v.widgets) ? [...new Set(v.widgets.filter((x) => W.includes(x)))] : W, chart: ['line', 'bar', 'area'].includes(v.chart) ? v.chart : 'area', group: ['day', 'month'].includes(v.group) ? v.group : 'day', compare: v.compare !== false, metric: ['net', 'tickets', 'margin'].includes(v.metric) ? v.metric : 'net', range: [7, 30, 90, 365].includes(Number(v.range)) ? Number(v.range) : 30 }; }
     else if (k === 'notify') { if (!v || typeof v !== 'object') throw bad('VALIDATION', 'Canaux invalides'); o.notify = {}; for (const c of ['inapp', 'email', 'sms', 'push']) if (c in v) o.notify[c] = !!v[c]; }
     else if (k === 'nickname') { o.nickname = String(v ?? '').slice(0, 40); }
     else throw bad('VALIDATION', `Préférence inconnue : ${k}`);

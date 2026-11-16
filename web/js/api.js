@@ -60,18 +60,24 @@ export async function blobUrl(path) { const r = await raw('GET', path); if (!r.o
 
 // Temps réel (SSE via fetch pour pouvoir envoyer l'en-tête Authorization)
 export async function listen(onEvent, signal) {
+  let fails = 0; // reconnexions espacées (5 s → 60 s) : aucune rafale de requêtes si le réseau ou le proxy coupe la connexion
   for (;;) {
+    let gave = false;
     try {
       await ensureFresh().catch(() => {}); let r = await raw('GET', '/events');
       if (r.status === 401) { await refresh(); r = await raw('GET', '/events'); } // jeton expiré : on le renouvelle et on se reconnecte tout de suite
+      if (r.status === 403) return; // droit absent : inutile d'insister
       if (!r.ok || !r.body) throw new Error('sse');
       const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
       for (;;) {
-        const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
+        const { done, value } = await rd.read(); if (done) break; gave = true; buf += dec.decode(value, { stream: true });
         let i; while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); const ev = /event: (.+)/.exec(chunk)?.[1], data = /data: (.+)/.exec(chunk)?.[1]; if (ev && data) try { onEvent(ev, JSON.parse(data)); } catch {} }
       }
     } catch {}
-    if (signal?.aborted || !state.token) return; await new Promise((r) => setTimeout(r, 5000));
+    if (signal?.aborted || !state.token) return;
+    fails = gave ? 0 : Math.min(fails + 1, 6);
+    await new Promise((r) => setTimeout(r, Math.min(60000, 5000 * 2 ** Math.max(0, fails - 1))));
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) await new Promise((r) => addEventListener('online', r, { once: true }));
   }
 }
 

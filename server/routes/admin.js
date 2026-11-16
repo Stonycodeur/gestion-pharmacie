@@ -211,7 +211,7 @@ router.post('/notifications/read', { anyPerm: ['dashboard.view', 'portal.use', '
   else run('UPDATE notifications SET is_read=1 WHERE (user_id=? OR (user_id IS NULL AND pharmacy_id=?))', ctx.user.id, ctx.ph ?? -1);
   return { ok: true };
 });
-router.get('/events', { anyPerm: ['dashboard.view', 'portal.use'], needsPharmacy: false, stream: true }, (ctx) => sseHandler(ctx));
+router.get('/events', { needsPharmacy: false, stream: true }, (ctx) => sseHandler(ctx));
 
 // ---------- documentation OpenAPI (générée depuis la table de routes) ----------
 router.get('/openapi.json', { public: true }, () => {

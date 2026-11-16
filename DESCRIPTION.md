@@ -182,3 +182,10 @@ Au premier lancement la base est vide : l'écran « Première configuration » c
 - Pièce d'identité du chauffeur : l'aperçu utilise le vrai type du fichier (PDF → iframe, image → img) ; visible par le chauffeur (« Voir ») et par l'admin (« Voir la pièce », audité).
 - Audio : déverrouillé seulement après une vraie activation utilisateur (plus d'avertissement AudioContext).
 - Test : `tests/views.test.js` (6 tests).
+
+## Flux /events fiable et Rapports › Analyse
+
+- `/events` (temps réel) est ouvert à tout compte connecté : les rôles sans droit « tableau de bord » (chauffeur, médecin…) recevaient un 403 relancé toutes les 5 s. Le client ne réessaie plus sur 403 et espace ses reconnexions (5 s → 60 s) après une coupure réseau/proxy (ex. `ERR_QUIC_PROTOCOL_ERROR`) ; le serveur envoie déjà un ping toutes les 25 s.
+- Rapports : nouvel onglet **Analyse** (par défaut) via `GET /reports/analytics` : indicateurs (CA net, tickets, panier moyen, marge HT, remboursé) comparés à la période précédente, courbe/aires/barres avec période précédente en pointillé, heures de pointe, jours de la semaine, modes de paiement (anneau), meilleures ventes.
+- Personnalisation (mémorisée sur le compte, préférence `reports_ui`) : blocs affichés et leur ordre, période (7/30/90 j/12 mois), regroupement jour/mois, indicateur, type de courbe, comparaison, réinitialisation.
+- Test : `tests/views.test.js` (7 tests).
