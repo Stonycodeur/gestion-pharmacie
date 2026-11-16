@@ -1,7 +1,7 @@
 import { syncPrefs, stopSync } from './prefsync.js';
 import { emit } from './events.js';
 import { state, api, get, post, refresh, setSession, can, listen, ApiError, mayHaveSession, endSession, sessionActive } from './api.js';
-import { h, clear, toast, fail, formModal, modal, when, icon, skeleton } from './ui.js';
+import { h, clear, toast, fail, formModal, modal, when, icon, skeleton, onePerPage } from './ui.js';
 import { t, lang, setLang, languages, loadLanguages, loadPack } from './i18n.js';
 import { setBrand, getPrefs, setPrefs, isDark, onTheme } from './theme.js';
 import { net, onNet, saveProfile, loadProfile, unlock, wipeAll, setScope, onSent, sync } from './offline.js';
@@ -234,7 +234,7 @@ async function render() {
   const id = (location.hash.replace(/^#\//, '') || 'dashboard').split('?')[0];
   const box = document.getElementById('content'); if (!box) return;
   document.querySelectorAll('.nav a,.tabbar a').forEach((a) => (a.dataset.id === id ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
-  const nm = NAV.find(([n]) => n === id)?.[1] || EXTRA[id] || ''; if (titleEl) titleEl.textContent = nm ? t(nm) : appName(); document.title = (nm ? t(nm) + ' · ' : '') + appName();
+  const nm = NAV.find(([n]) => n === id)?.[1] || EXTRA[id] || ''; if (titleEl) titleEl.textContent = nm ? t(nm) : appName(); document.title = (nm ? t(nm) + ' · ' : '') + appName(); window.__gpx = { page: nm ? t(nm) : '', view: '' }; // contexte des exports : page › vue
   const known = !!EXTRA[id] || NAV.some(([n, , p]) => n === id && navOk(n, p));
   if (!known) { clear(box).append(h('div', { class: 'alert bad' }, 'Page indisponible ou accès refusé.')); return; }
   clear(box).append(skeleton(5));
@@ -245,8 +245,9 @@ async function render() {
   } catch (e) { if (token !== current) return; clear(box).append(h('div', { class: 'alert bad' }, icon('alert', { size: 18 }), h('span', {}, e.status === 0 ? 'Cette page n\'a pas encore été consultée sur cet appareil : elle n\'est pas disponible hors connexion.' : e.message || String(e)))); if (e.status !== 0) console.error(e); }
 }
 window.addEventListener('hashchange', () => state.token && render());
+{ let q = 0; new MutationObserver(() => { if (q) return; q = requestAnimationFrame(() => { q = 0; try { onePerPage(); } catch { /* cosmétique */ } }); }).observe(document.getElementById('app') || document.body, { childList: true, subtree: true }); }
 // Vue courante (onglet actif d'une page) : « Mon espace · Mes commandes » dans l'en-tête et le titre de l'onglet du navigateur.
-window.addEventListener('gp:view', (e) => { const id = (location.hash.replace(/^#\//, '') || 'dashboard').split('?')[0], nm = NAV.find(([n]) => n === id)?.[1] || EXTRA[id] || ''; if (!nm) return; if (titleEl) { titleEl.textContent = ''; titleEl.append(t(nm), ' ', Object.assign(document.createElement('span'), { className: 'view-crumb', textContent: '› ' + e.detail })); } document.title = e.detail + ' · ' + t(nm) + ' · ' + appName(); });
+window.addEventListener('gp:view', (e) => { const id = (location.hash.replace(/^#\//, '') || 'dashboard').split('?')[0], nm = NAV.find(([n]) => n === id)?.[1] || EXTRA[id] || ''; if (!nm) return; if (titleEl) { titleEl.textContent = ''; titleEl.append(t(nm), ' ', Object.assign(document.createElement('span'), { className: 'view-crumb', textContent: '› ' + e.detail })); } document.title = e.detail + ' · ' + t(nm) + ' · ' + appName(); window.__gpx = { page: t(nm), view: e.detail }; });
 
 window.addEventListener('gp:impersonate', async (e) => { location.hash = ''; try { await boot(e.detail); } catch (er) { fail(er); } });
 // ---------- init ----------

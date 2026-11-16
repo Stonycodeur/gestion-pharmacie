@@ -88,7 +88,7 @@ export function createPrescription(ctx, b, customerId) {
 }
 router.get('/prescriptions', { perm: 'prescriptions.view' }, (ctx) => {
   const w = ['p.pharmacy_id=?'], a = [ctx.ph]; if (ctx.query.status) { w.push('p.status=?'); a.push(ctx.query.status); }
-  if (ctx.query.q) { w.push('(p.number LIKE ? OR p.patient_name LIKE ?)'); a.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`); }
+  if (ctx.query.q) { const l = `%${ctx.query.q}%`; w.push('(p.number LIKE ? OR p.patient_name LIKE ? OR p.prescriber_name LIKE ? OR p.status LIKE ?)'); a.push(l, l, l, l); }
   return paged(ctx, `SELECT COUNT(*) n FROM prescriptions p WHERE ${w.join(' AND ')}`, `SELECT p.id,p.number,p.patient_name,p.prescriber_name,p.prescription_date,p.valid_until,p.status,p.created_at, (p.file_path IS NOT NULL) has_file FROM prescriptions p WHERE ${w.join(' AND ')} ORDER BY p.id DESC`, a);
 });
 router.post('/prescriptions', { perm: 'prescriptions.create', bodyLimit: 6e6 }, (ctx) => createPrescription(ctx, ctx.body, null));

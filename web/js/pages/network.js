@@ -40,7 +40,7 @@ async function drawPharmacies(body) {
   const wrap = h('div', { class: 'card' });
   clear(wrap).append(h('div', { class: 'row between' }, h('h2', {}, 'Établissements'), h('button', { class: 'btn sm primary', onclick: () => open('Nouvel établissement', PF({}, true), async (v) => { await post('/pharmacies', clean(v)); toast('Établissement créé'); clear(body); drawPharmacies(body); }, true) }, icon('plus', { size: 14 }), 'Nouveau')),
     table([
-      { label: '', render: (p) => p.logo_url ? h('img', { src: p.logo_url, alt: '', width: 36, height: 36, style: { borderRadius: '8px', objectFit: 'cover' } }) : h('span', { class: 'avatar-lg', style: { width: '36px', height: '36px', fontSize: '1rem' } }, p.name[0]) },
+      { label: '', render: (p) => h('img', { src: p.logo_url || '/assets/icon-192.png', alt: '', width: 36, height: 36, style: { borderRadius: '8px', objectFit: p.logo_url ? 'cover' : 'contain', opacity: p.logo_url ? 1 : .85 } }) || h('span', { class: 'avatar-lg', style: { width: '36px', height: '36px', fontSize: '1rem' } }, p.name[0]) },
       { label: 'Nom', render: (p) => h('div', {}, h('strong', {}, p.name), h('div', { class: 'muted' }, [p.city, p.address].filter(Boolean).join(' · '))) },
       { label: 'Pays', render: (p) => { const c = countries.find((x) => x.id === p.country_id); return c ? h('span', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap' } }, flagImg(c), `${c.name} (+${c.dial_code})`) : '—'; } },
       { label: 'Gestionnaire', render: (p) => p.manager ? h('span', {}, p.manager.name) : h('span', { class: 'muted' }, 'Non affecté') },
@@ -57,7 +57,7 @@ async function drawPharmacies(body) {
 }
 
 function logoModal(p, done) {
-  const inp = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp' }); const prev = h('div', {}, p.logo_url ? h('img', { src: p.logo_url, alt: 'Logo', height: 64, style: { borderRadius: '10px' } }) : h('p', { class: 'muted' }, 'Aucun logo'));
+  const inp = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp' }); const prev = h('div', {}, p.logo_url ? h('img', { src: p.logo_url, alt: 'Logo', height: 64, style: { borderRadius: '10px' } }) : h('div', { class: 'row' }, h('img', { src: '/assets/icon-192.png', alt: '', height: 64, style: { borderRadius: '10px', opacity: .85 } }), h('p', { class: 'muted' }, 'Aucun logo : l\'icône de l\'application est utilisée par défaut (documents, exports, fiches).')));
   inp.addEventListener('change', async () => { const f = inp.files[0]; if (!f) return; clear(prev).append(h('img', { src: URL.createObjectURL(f), alt: 'Aperçu', height: 64, style: { borderRadius: '10px' } })); });
   const m = modal(`Logo — ${p.name}`, h('div', {}, h('p', { class: 'muted' }, 'Affiché sur les e-mails (bienvenue, demandes de prix) et dans l\'application. PNG, JPEG ou WebP, 1 Mo max.'), prev, inp,
     h('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '12px' } }, p.logo_url ? h('button', { class: 'btn danger', onclick: async () => { try { await del(`/pharmacies/${p.id}/logo`); m.close(); done(); } catch (e) { fail(e); } } }, 'Retirer') : null,

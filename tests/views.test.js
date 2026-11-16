@@ -146,3 +146,17 @@ test('2FA par QR code, aide ouverte au chauffeur, chauffeur multi-pharmacies et 
   assert.ok((await call('GET', '/auth/me', null, adm)).body.permissions.includes('view.reports'));
   const me = (await call('POST', '/auth/login', { email: 'drv4@t.local', password: PW2 })).body; assert.ok(me.permissions.includes('view.driver') && me.permissions.includes('view.help'));
 });
+
+test('exports : sous-titre (page › vue), logo par défaut, Excel filtrable/triable, PDF paginé ; recherche multi-champs', async () => {
+  const adm = await login('admin'), tok = adm; const get = async (p) => { const r = await fetch(base + p, { headers: { authorization: 'Bearer ' + tok } }); return { status: r.status, buf: Buffer.from(await r.arrayBuffer()), cd: r.headers.get('content-disposition') }; };
+  const x = await get('/reports/sales?format=xlsx&from=2020-01-01'); assert.equal(x.status, 200); const s = x.buf.toString('latin1');
+  for (const k of ['<autoFilter ref="A6:', 'state="frozen"', 'xdr:pic', 'xl/media/logo.png', 'Rapports', 'Ventes', 'SUBTOTAL(109', 'Print_Titles']) assert.ok(s.includes(k), 'Excel : ' + k);
+  assert.match(x.cd, /ventes-\d{4}-\d{2}-\d{2}\.xlsx/);
+  const p = await get('/reports/sales?format=pdf&from=2020-01-01'); assert.equal(p.status, 200); const ps = p.buf.toString('latin1'); assert.ok(ps.startsWith('%PDF') && ps.includes('(Rapports)') && ps.includes('(Ventes)') && ps.includes('Page 1 / 1') && ps.includes('/Subtype /Image'), 'PDF : titre, sous-titre, logo, pagination');
+  const post = async (b) => fetch(base + '/export/grid', { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify(b) });
+  const g = await post({ format: 'xlsx', title: 'Stock', subtitle: 'Lots', head: ['Produit', 'Disp.'], data: [['A', 3], ['B', 5.5]], dec: [null, 1] }); assert.equal(g.status, 200); const gs = Buffer.from(await g.arrayBuffer()).toString('latin1'); assert.ok(gs.includes('Stock') && gs.includes('Lots') && gs.includes('<v>5.5</v>') && gs.includes('<autoFilter'));
+  assert.match(g.headers.get('content-disposition'), /Stock-Lots-/); assert.equal((await post({ format: 'doc', head: ['a'], data: [] })).status, 400); assert.equal((await post({ format: 'pdf', head: [], data: [] })).status, 400);
+  // recherche : le caissier et le mode de paiement retrouvent aussi une vente
+  const all = (await (await fetch(base + '/sales?limit=5', { headers: { authorization: 'Bearer ' + tok } })).json()); const first = (all.data || [])[0];
+  if (first) { const q = await (await fetch(base + '/sales?q=' + encodeURIComponent(first.cashier_name), { headers: { authorization: 'Bearer ' + tok } })).json(); assert.ok((q.data || []).some((r) => r.id === first.id), 'recherche par caissier'); }
+});

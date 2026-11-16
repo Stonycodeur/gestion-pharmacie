@@ -27,7 +27,7 @@ router.get('/users', { perm: 'users.manage', needsPharmacy: false }, (ctx) => {
   if (ctx.query.status) { w.push('u.status=?'); p.push(ctx.query.status); } else if (ctx.query.include_deleted !== '1') w.push("u.status NOT IN ('deleted','trashed')");
   if (ctx.query.role) { w.push('u.role_code=?'); p.push(ctx.query.role); }
   if (ctx.query.pharmacy_id && isSuper(ctx)) { w.push('u.pharmacy_id=?'); p.push(Number(ctx.query.pharmacy_id)); }
-  if (ctx.query.q) { w.push('(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`); }
+  if (ctx.query.q) { w.push('(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR u.role_code LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`); }
   return paged(ctx, `SELECT COUNT(*) n FROM users u WHERE ${w.join(' AND ')}`, `SELECT u.id,u.email,u.name,u.phone,u.role_code,u.pharmacy_id,u.status,u.status_reason,u.suspended_until,u.mfa_enabled,u.locked_until,u.last_login_at,u.created_at,u.is_primary,u.avatar_path,u.country_id,u.see_all_countries,ph.name pharmacy_name FROM users u LEFT JOIN pharmacies ph ON ph.id=u.pharmacy_id WHERE ${w.join(' AND ')} ORDER BY u.name`, p);
 });
 router.get('/users/:id', { perm: 'users.manage', needsPharmacy: false }, (ctx) => {
@@ -173,7 +173,7 @@ router.get('/audit', { perm: 'audit.view', needsPharmacy: false }, (ctx) => {
   const w = ['1=1'], p = [];
   if (ctx.user.role !== 'super_admin') { w.push('a.pharmacy_id=?'); p.push(ctx.ph); } else if (ctx.query.pharmacy_id) { w.push('a.pharmacy_id=?'); p.push(ctx.query.pharmacy_id); }
   for (const [k, c] of [['user_id', 'a.user_id'], ['entity', 'a.entity'], ['action', 'a.action']]) if (ctx.query[k]) { w.push(`${c}=?`); p.push(ctx.query[k]); }
-  if (ctx.query.q) { w.push('(a.action LIKE ? OR a.user_email LIKE ? OR a.entity_id LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`); }
+  if (ctx.query.q) { w.push('(a.action LIKE ? OR a.user_email LIKE ? OR a.entity_id LIKE ? OR a.entity LIKE ? OR a.ip LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`, `%${ctx.query.q}%`); }
   if (ctx.query.from) { w.push('a.created_at >= ?'); p.push(ctx.query.from); } if (ctx.query.to) { w.push('a.created_at <= ?'); p.push(ctx.query.to + ' 23:59:59'); }
   const out = paged(ctx, `SELECT COUNT(*) n FROM audit_logs a WHERE ${w.join(' AND ')}`, `SELECT a.* FROM audit_logs a WHERE ${w.join(' AND ')} ORDER BY a.id DESC`, p);
   return resolveOrigins(out);

@@ -33,7 +33,7 @@ router.get('/sales', { perm: 'sales.view' }, (ctx) => {
   const w = ['s.pharmacy_id=?'], p = [ctx.ph];
   if (ctx.query.from) { w.push('s.created_at >= ?'); p.push(ctx.query.from); }
   if (ctx.query.to) { w.push('s.created_at <= ?'); p.push(ctx.query.to + ' 23:59:59'); }
-  if (ctx.query.q) { w.push('(s.number LIKE ? OR c.name LIKE ?)'); p.push(`%${ctx.query.q}%`, `%${ctx.query.q}%`); }
+  if (ctx.query.q) { const l = `%${ctx.query.q}%`; w.push("(s.number LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR u.name LIKE ? OR EXISTS (SELECT 1 FROM payments pm WHERE pm.sale_id=s.id AND pm.method LIKE ?) OR CAST(s.total AS CHAR) LIKE ?)"); p.push(l, l, l, l, l, l); }
   if (!can(ctx.user, 'cash.view_all') && ctx.user.role === 'cashier') { w.push('s.cashier_id=?'); p.push(ctx.user.id); }
   const from = `FROM sales s JOIN users u ON u.id=s.cashier_id LEFT JOIN customers c ON c.id=s.customer_id WHERE ${w.join(' AND ')}`;
   return paged(ctx, `SELECT COUNT(*) n ${from}`, `SELECT s.id,s.number,s.total,s.discount,s.status,s.created_at,u.name cashier_name,c.name customer_name ${from} ORDER BY s.id DESC`, p);

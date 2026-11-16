@@ -202,3 +202,14 @@ Au premier lancement la base est vide : l'écran « Première configuration » c
 
 - Réseau › Établissements › Gestionnaire : correction de l'erreur `filter is not a function` (la liste des rôles est lue dans `/roles` → `roles`).
 - Si l'établissement a déjà un administrateur actif, la fenêtre le propose directement (mode « membre du personnel » présélectionné, rôle repris) : l'administrateur peut être le gestionnaire, aucun autre compte n'est nécessaire.
+
+## Exports uniformisés, logo par défaut, recherche unique
+
+- **Titre + sous-titre sur tous les exports** : titre = page (« Stock »), sous-titre = vue/onglet exporté (« Lots », « Mouvements », « Alertes », « Températures »…). Rapports/Comptabilité/Clients/Achats/Prévisions : `server/exportmeta.js` (`EXPORT_VIEWS`) ; tableaux affichés à l'écran : contexte `window.__gpx` (page › onglet courant).
+- **Bloc d'en-tête commun** : logo de la pharmacie, **à défaut l'icône de l'application (favicon, `web/assets/icon-192.png`)**, nom de la pharmacie, date (fuseau de la pharmacie), auteur, période.
+- **Excel (.xlsx) personnalisé** : filtres + tri automatiques sur chaque colonne, volets figés, largeurs ajustées, nombres/montants réels (triables), totaux dynamiques `SUBTOTAL` (suivent les filtres), logo, impression paysage ajustée avec titres répétés et pied « Page x / y ».
+- **PDF personnalisé** : bandeau, logo, titre/sous-titre, en-tête de colonnes coloré répété à chaque page, lignes zébrées, ligne de total des montants, pied de page « Page i / n ». Aperçu imprimable aligné sur le même style.
+- **Export d'un tableau affiché** (`POST /export/grid`, journalisé) : Excel, PDF, CSV, impression, JSON, texte ; les colonnes numériques partent en vrais nombres. Hors connexion : repli CSV / aperçu imprimable.
+- **Une seule recherche par page** : la recherche intégrée des tableaux est masquée quand la page a déjà la sienne ; sinon une recherche « maîtresse » filtre tous les tableaux de la page. Recherche élargie côté serveur : ventes (n°, client, téléphone, caissier, mode de paiement, montant), ordonnances (n°, patient, prescripteur, statut), stock (code-barres partiel), utilisateurs (rôle), audit (entité, IP). Les filtres restent sur la même ligne que la recherche.
+- **Icône par défaut** aussi dans la liste des établissements, la fiche logo et les cartes pharmacies côté client.
+- Tests : `tests/views.test.js` (9 tests).

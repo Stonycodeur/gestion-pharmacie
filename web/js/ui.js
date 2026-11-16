@@ -1,7 +1,7 @@
 // Petite bibliothèque d'interface : construction DOM sûre (textContent, jamais innerHTML avec des données).
 import { t, fmtDate } from './i18n.js';
 import { phoneField } from './net.js';
-import { state, ApiError } from './api.js';
+import { state, ApiError, postBlob } from './api.js';
 import { icon } from './icons.js';
 export { icon };
 // Bouton avec icône SVG : ib('plus', 'Nouveau', { class:'btn primary', onclick })
@@ -93,25 +93,39 @@ export function table(columns, rows, { onRow, empty = 'Aucun résultat', rowClas
   const tb = h('tbody', {}, rows.map((r) => { const tr = h('tr', { class: rowClass?.(r) || '', 'data-rid': r.id ?? null, onclick: onRow ? () => onRow(r) : null, style: onRow ? { cursor: 'pointer' } : null },
     columns.map((c) => { const v = c.render ? c.render(r) : r[c.key]; return h('td', { class: (c.num ? 'num ' : '') + (c.nowrap ? 'nowrap' : ''), 'data-label': c.label ? t(c.label) : '' }, v ?? ''); })); return tr; }));
   const tw = h('div', { class: 'tw' }, h('table', { class: 'rt' }, h('thead', {}, h('tr', {}, columns.map((c) => h('th', { class: c.num ? 'num' : '' }, c.label ? t(c.label) : '')))), tb));
-  const none = h('div', { class: 'empty', hidden: true }, t('Aucun résultat')), box = h('input', { type: 'search', class: 'sr-search', placeholder: t('Rechercher dans la liste…'), 'aria-label': t('Rechercher dans la liste'), autocomplete: 'off', hidden: search === false || rows.length < 6 });
-  box.addEventListener('input', () => { const q = box.value.trim().toLowerCase(); let n = 0; for (const tr of tb.rows) { const ok = !q || tr.textContent.toLowerCase().includes(q); tr.hidden = !ok; if (ok) n++; } none.hidden = n > 0; });
+  const none = h('div', { class: 'empty', hidden: true }, t('Aucun résultat')), box = h('input', { type: 'search', class: 'sr-search tsb', placeholder: t('Rechercher dans la liste…'), 'aria-label': t('Rechercher dans la liste'), autocomplete: 'off', hidden: search === false || rows.length < 6 });
+  // Recherche sur toutes les colonnes affichées. Une seule recherche par page (cf. onePerPage) : si plusieurs tableaux sont visibles, la recherche maîtresse les filtre tous.
+  const apply = (q) => { let n = 0; for (const tr of tb.rows) { const ok = !q || tr.textContent.toLowerCase().includes(q); tr.hidden = !ok; if (ok) n++; } none.hidden = n > 0; }; box._apply = apply;
+  box.addEventListener('input', () => { const q = box.value.trim().toLowerCase(); apply(q); if (box.dataset.master) for (const o of document.querySelectorAll('#content .tsb')) if (o !== box && o._apply) { o.value = box.value; o._apply(q); } });
   // Export des lignes affichées (après recherche) : CSV, Excel, JSON, texte, ou PDF/impression.
   const grid = () => { const head = columns.map((c) => (c.label ? t(c.label) : '')), keep = columns.map((c, i) => (c.label ? i : -1)).filter((i) => i >= 0); const data = [...tb.rows].filter((tr) => !tr.hidden).map((tr) => keep.map((i) => (tr.cells[i]?.innerText ?? '').replace(/\s+/g, ' ').trim())); return { head: keep.map((i) => head[i]), data }; };
-  const exp = h('select', { class: 'sr-export', 'aria-label': t('Exporter'), onchange: (e) => { const f = e.target.value; e.target.value = ''; if (f) exportGrid(grid(), f, document.title || 'export'); } }, h('option', { value: '' }, `⭳ ${t('Exporter')}`), ...[['csv', 'CSV'], ['xls', 'Excel (.xls)'], ['json', 'JSON'], ['txt', t('Texte')], ['pdf', 'PDF / ' + t('Imprimer')]].map(([v, l]) => h('option', { value: v }, l)));
+  const exp = h('select', { class: 'sr-export', 'aria-label': t('Exporter'), onchange: (e) => { const f = e.target.value; e.target.value = ''; if (f) exportGrid(grid(), f, document.title || 'export'); } }, h('option', { value: '' }, `⭳ ${t('Exporter')}`), ...[['xlsx', 'Excel (.xlsx)'], ['pdf', 'PDF'], ['csv', 'CSV'], ['print', t('Imprimer')], ['json', 'JSON'], ['txt', t('Texte')]].map(([v, l]) => h('option', { value: v }, l)));
   return h('div', { class: 'tblwrap' }, h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', alignItems: 'center' } }, box, exp), tw, none);
 }
 const save = (name, mime, text) => { const a = h('a', { href: URL.createObjectURL(new Blob(['\ufeff' + text], { type: mime + ';charset=utf-8' })), download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); };
 const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-// Export générique (utilisable aussi hors tableau) : { head: [..], data: [[..]] }
-export function exportGrid({ head, data }, format, title = 'export') {
-  const base = String(title).replace(/[^\w\-À-ÿ]+/g, '_').slice(0, 40) + '-' + new Date().toISOString().slice(0, 10);
+// Nombres lus avec les séparateurs de la langue : les colonnes 100 % numériques partent en Excel comme de vrais nombres (triables, totalisables).
+function typedGrid(head, data) {
+  const parts = new Intl.NumberFormat(undefined, { minimumFractionDigits: 1 }).formatToParts(12345.6), grp = parts.find((p) => p.type === 'group')?.value || ',', dcm = parts.find((p) => p.type === 'decimal')?.value || '.', cur = state.pharmacy?.currency || '';
+  const num = (v) => { let x = String(v).replace(/[\s\u00a0\u202f]/g, ''); if (cur) x = x.replace(cur, ''); if (!x || /[^\d.,\-+]/.test(x)) return null; x = x.split(grp.replace(/[\s\u00a0\u202f]/g, '') || ',').join('').replace(dcm, '.'); if (!/^-?\d+(\.\d+)?$/.test(x) || /^-?0\d/.test(x) || x.replace(/\D/g, '').length > 15) return null; return x; };
+  const dec = head.map((_, c) => { let any = false, d = 0; for (const r of data) { const v = r[c]; if (v === '' || v == null) continue; const n = num(v); if (n === null) return null; any = true; d = Math.max(d, (n.split('.')[1] || '').length); } return any ? d : null; });
+  return { dec, rows: data.map((r) => r.map((v, c) => (dec[c] !== null && v !== '' && v != null ? Number(num(v)) : v))) };
+}
+const logoSrc = () => (state.pharmacy?.logo_path ? `/api/v1/public/file/${state.pharmacy.logo_path}` : '/assets/icon-192.png');
+// Export générique (utilisable aussi hors tableau) : { head: [..], data: [[..]] }. Titre = page, sous-titre = vue (onglet) — ex. « Stock » › « Lots ».
+export async function exportGrid({ head, data }, format, title = 'export', subtitle) {
+  const x = window.__gpx || {}, ttl = x.page || title, sub = subtitle ?? x.view ?? '';
+  const base = (String(ttl) + (sub ? '-' + sub : '')).replace(/[^\w\-À-ÿ]+/g, '_').slice(0, 60) + '-' + new Date().toISOString().slice(0, 10);
   if (format === 'csv') return save(base + '.csv', 'text/csv', [head, ...data].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n'));
-  if (format === 'json') return save(base + '.json', 'application/json', JSON.stringify(data.map((r) => Object.fromEntries(head.map((k, i) => [k || 'col' + i, r[i]]))), null, 1));
-  if (format === 'txt') return save(base + '.txt', 'text/plain', [head, ...data].map((r) => r.join('\t')).join('\n'));
-  const html = `<table border="1"><thead><tr>${head.map((x) => `<th>${esc(x)}</th>`).join('')}</tr></thead><tbody>${data.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-  if (format === 'xls') return save(base + '.xls', 'application/vnd.ms-excel', `<html><head><meta charset="utf-8"></head><body>${html}</body></html>`);
-  const w = window.open('', '_blank'); if (!w) return toast(t('Autorisez les fenêtres pour exporter en PDF'));
-  w.document.write(`<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>body{font:12px system-ui;margin:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:4px 6px;text-align:left}th{background:#eee}</style><h2>${esc(title)}</h2><p>${new Date().toLocaleString()}</p>${html}`); w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+  if (format === 'json') return save(base + '.json', 'application/json', JSON.stringify({ title: ttl, view: sub, pharmacy: state.pharmacy?.name || '', exported_at: new Date().toISOString(), rows: data.map((r) => Object.fromEntries(head.map((k, i) => [k || 'col' + i, r[i]]))) }, null, 1));
+  if (format === 'txt') return save(base + '.txt', 'text/plain', [`${ttl}${sub ? ' · ' + sub : ''}`, state.pharmacy?.name || '', '', head, ...data].map((r) => (Array.isArray(r) ? r.join('\t') : r)).join('\n'));
+  if (format === 'xlsx' || format === 'xls' || format === 'pdf') {
+    try { const { dec, rows } = typedGrid(head, data), { blob, name } = await postBlob('/export/grid', { format: format === 'pdf' ? 'pdf' : 'xlsx', title: ttl, subtitle: sub, head, data: rows, dec }); const a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800); return; }
+    catch (e) { if (e?.status && e.status < 500) return toast(e.message || t('Export impossible')); if (format !== 'pdf') return save(base + '.csv', 'text/csv', [head, ...data].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n')), toast(t('Hors connexion : export CSV à la place')); /* PDF hors connexion : aperçu imprimable */ }
+  }
+  const html = `<table><thead><tr>${head.map((k) => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${data.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const w = window.open('', '_blank'); if (!w) return toast(t('Autorisez les fenêtres pour imprimer'));
+  w.document.write(`<!doctype html><meta charset="utf-8"><title>${esc(ttl)}${sub ? ' · ' + esc(sub) : ''}</title><base href="${location.origin}/"><style>@page{size:A4 landscape;margin:12mm}body{font:11px system-ui,Segoe UI,Arial;margin:0;color:#14201f}.hd{display:flex;gap:14px;align-items:center;border-top:6px solid #0f766e;padding:12px 0 10px;border-bottom:1.5px solid #0f766e;margin-bottom:12px}.hd img{height:52px;width:auto;max-width:120px;object-fit:contain}.hd .ph{font-weight:700;color:#667370;font-size:12px}.hd h1{margin:2px 0;font-size:21px}.hd h2{margin:0;font-size:13px;color:#0f766e}.hd .r{margin-inline-start:auto;text-align:end;color:#667370;font-size:11px;line-height:1.6}table{border-collapse:collapse;width:100%}th{background:#0f766e;color:#fff;text-align:left;padding:6px 8px;font-size:11px}td{border-bottom:1px solid #d9e1df;padding:5px 8px}tr:nth-child(even) td{background:#f3f8f7}thead{display:table-header-group}tr{break-inside:avoid}.ft{margin-top:10px;color:#667370;font-size:10px}</style><div class="hd"><img src="${esc(logoSrc())}" alt=""><div><div class="ph">${esc(state.pharmacy?.name || '')}</div><h1>${esc(ttl)}</h1>${sub ? `<h2>${esc(sub)}</h2>` : ''}</div><div class="r">${esc(new Date().toLocaleString())}<br>${esc(state.user?.name || '')}<br>${data.length} ${esc(t('ligne(s)'))}</div></div>${html}<div class="ft">${esc(state.pharmacy?.name || '')} — ${esc(ttl)}${sub ? ' · ' + esc(sub) : ''}</div>`); w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
 }
 export const badge = (text, kind = '') => h('span', { class: 'badge ' + (kind ? 'b-' + kind : '') }, text);
 export function pager(res, load) {
@@ -181,4 +195,15 @@ export function historyToggle() {
   const b = h('button', { type: 'button', class: 'btn sm', 'aria-pressed': String(histHidden()) }); const paint = () => { clear(b).append(icon(histHidden() ? 'eye' : 'history', { size: 14 }), ' ', t(histHidden() ? 'Afficher l\'historique' : 'Masquer l\'historique')); b.setAttribute('aria-pressed', String(histHidden())); };
   b.onclick = () => { const v = !histHidden(); try { localStorage.setItem('hist.hidden', v ? '1' : '0'); } catch { /* ignoré */ } document.body.classList.toggle('hide-history', v); document.querySelectorAll('.history-toggle').forEach((x) => x.dispatchEvent(new Event('repaint'))); };
   b.classList.add('history-toggle'); b.addEventListener('repaint', paint); paint(); return b;
+}
+
+// Une seule fonction de recherche par page : si la page a déjà sa recherche (serveur, multi-champs) la recherche intégrée des tableaux est masquée ;
+// sinon la première recherche intégrée devient « maîtresse » et filtre tous les tableaux de la page. Les fenêtres (modales) et les blocs « passés » gardent la leur.
+export function onePerPage(root = document.getElementById('content')) {
+  if (!root) return;
+  const own = (i) => !i.closest('.overlay,.modal,details.past') && !i.hidden && !i.disabled;
+  const all = [...root.querySelectorAll('input[type=search]')].filter(own), page = all.filter((i) => !i.classList.contains('tsb')), built = all.filter((i) => i.classList.contains('tsb'));
+  let master = null;
+  for (const b of built) { const hide = page.length > 0 || (master && master !== b); if (hide) b.dataset.dup = '1'; else { delete b.dataset.dup; master ||= b; } }
+  for (const b of built) { if (b === master && built.length > 1) b.dataset.master = '1'; else delete b.dataset.master; }
 }

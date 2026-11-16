@@ -8,7 +8,7 @@ import { computeAlerts, refreshNotifications } from '../alerts.js';
 router.get('/stock', { perm: 'stock.view' }, (ctx) => {
   const { q, state, category_id } = ctx.query; const { page, limit, offset } = paging(ctx.query);
   const w = ["p.status='active'"], p = [ctx.ph];
-  if (q) { w.push('(p.name LIKE ? OR p.dci LIKE ? OR p.sku LIKE ? OR p.barcode = ?)'); p.push(`%${q}%`, `%${q}%`, `%${q}%`, q); }
+  if (q) { w.push('(p.name LIKE ? OR p.dci LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)'); p.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`); }
   if (category_id) { w.push('p.category_id=?'); p.push(category_id); }
   let rows = all(`${stockSummarySql} WHERE ${w.join(' AND ')} GROUP BY p.id ORDER BY p.name`, ...p).map((r) => ({ ...r, state: productStatus(r) }));
   if (state) rows = rows.filter((r) => r.state === state);

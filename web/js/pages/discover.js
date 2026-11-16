@@ -9,7 +9,7 @@ export function chosenPharmacy() { try { return JSON.parse(localStorage.getItem(
 let here = null;
 
 export function pharmacyCard(p, onChoose, chosenId) {
-  return h('div', { class: 'pcard' }, p.logo_url ? h('img', { class: 'logo', src: p.logo_url, alt: '' }) : h('div', { class: 'logo' }, p.name[0]),
+  return h('div', { class: 'pcard' }, h('img', { class: 'logo', src: p.logo_url || '/assets/icon-192.png', alt: '' }),
     h('div', { class: 'grow' }, h('div', { class: 'row between', style: { flexWrap: 'nowrap' } }, h('strong', {}, p.name), p.distance_km != null ? badge(fmtKm(p.distance_km), 'info') : null),
       h('div', { class: 'row', style: { gap: '6px', flexWrap: 'nowrap', margin: '2px 0' } }, flagImg(p.country, 20), h('span', { class: 'muted' }, [p.city, p.country?.name].filter(Boolean).join(' · '))),
       p.address ? h('div', { class: 'muted' }, p.address) : null, p.opening_hours ? h('div', { class: 'muted' }, icon('history', { size: 13 }), ' ', p.opening_hours) : null, p.phone ? h('div', {}, h('a', { href: 'tel:' + p.phone }, p.phone)) : null,

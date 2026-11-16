@@ -56,6 +56,8 @@ export async function download(path, filename) {
   const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 export async function blobOf(path) { const r = await raw('GET', path); if (!r.ok) throw new ApiError(r.status, await r.json().catch(() => null)); return r.blob(); }
+// POST qui renvoie un fichier (export Excel / PDF d'un tableau affiché) : { blob, name }
+export async function postBlob(path, body) { const r = await raw('POST', path, body); if (!r.ok) throw new ApiError(r.status, await r.json().catch(() => null)); const m = /filename="?([^";]+)/.exec(r.headers.get('content-disposition') || ''); return { blob: await r.blob(), name: m?.[1] || 'export' }; }
 export async function blobUrl(path) { const r = await raw('GET', path); if (!r.ok) throw new ApiError(r.status, null); return URL.createObjectURL(await r.blob()); }
 
 // Temps réel (SSE via fetch pour pouvoir envoyer l'en-tête Authorization)

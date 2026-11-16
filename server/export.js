@@ -37,7 +37,8 @@ function fit(s, width, size, bold) {
 class Pdf {
   constructor(w, h) { this.pages = []; this.w = w; this.h = h; this.newPage(); }
   newPage() { this.cur = []; this.pages.push(this.cur); }
-  text(x, y, s, size = 9, bold = false) { this.cur.push(Buffer.concat([Buffer.from(`BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x.toFixed(2)} ${(this.h - y).toFixed(2)} Td (`), enc(s), Buffer.from(') Tj ET\n')])); }
+  text(x, y, s, size = 9, bold = false, color = null) { this.cur.push(Buffer.concat([Buffer.from(`${color ? color.join(' ') + ' rg ' : ''}BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x.toFixed(2)} ${(this.h - y).toFixed(2)} Td (`), enc(s), Buffer.from(`) Tj ET${color ? ' 0 g' : ''}\n`)])); }
+  frect(x, y, w, h, rgb) { this.cur.push(Buffer.from(`${rgb.join(' ')} rg ${x.toFixed(2)} ${(this.h - y - h).toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f 0 g\n`)); }
   line(x1, y1, x2, y2, wd = 0.5) { this.cur.push(Buffer.from(`${wd} w ${x1} ${this.h - y1} m ${x2} ${this.h - y2} l S\n`)); }
   image(x, y, w, h, img) { this.imgs ||= []; const k = 'Im' + (this.imgs.push(img)); (this.pageImgs ||= new Map()); const set = this.pageImgs.get(this.pages.length - 1) || new Set(); set.add(k); this.pageImgs.set(this.pages.length - 1, set); this.cur.push(Buffer.from(`q ${w} 0 0 ${h} ${x} ${this.h - y - h} cm /${k} Do Q\n`)); }
   rect(x, y, w, h, gray) { this.cur.push(Buffer.from(`${gray} g ${x} ${this.h - y - h} ${w} ${h} re f 0 g\n`)); }
@@ -63,8 +64,11 @@ class Pdf {
   }
 }
 
-// Tableau paginé. columns: [{key, label, money?, align?}] ; rows: objets ; dec = décimales monétaires
-export function pdfTable({ title, subtitle = '', columns, rows, dec = 3, footer = '' }) {
+// Tableau paginé, personnalisé : bandeau + logo de la pharmacie (ou icône par défaut), titre de la page, sous-titre de la vue exportée,
+// date/auteur/période, en-tête de colonnes coloré répété à chaque page, lignes zébrées, total des montants, pied de page « Page i / n ».
+// columns: [{key, label, money?}] ; rows: objets ; dec = décimales monétaires ; meta: { pharmacy, logo, by, at, period, totals }
+const BRAND = [0.06, 0.46, 0.43], GRAY = [0.4, 0.45, 0.45], ZEBRA = [0.955, 0.972, 0.97];
+export function pdfTable({ title, subtitle = '', columns, rows, dec = 3, footer = '', meta = {} }) {
   const landscape = columns.length > 6;
   const W = landscape ? 842 : 595, H = landscape ? 595 : 842, M = 36;
   const pdf = new Pdf(W, H);
@@ -72,25 +76,42 @@ export function pdfTable({ title, subtitle = '', columns, rows, dec = 3, footer 
   const weights = columns.map((c) => Math.min(28, Math.max(6, c.label.length, ...rows.slice(0, 200).map((r) => String(cell(c, r)).length))));
   const tw = weights.reduce((a, b) => a + b, 0), avail = W - 2 * M;
   const widths = weights.map((w) => (w / tw) * avail);
+  const sums = columns.map((c) => (c.money ? rows.reduce((a, r) => a + (Number(r[c.key]) || 0), 0) : null)), withTotal = meta.totals !== false && rows.length > 1 && sums.some((v) => v !== null);
   const head = () => {
-    pdf.text(M, M, title, 14, true); if (subtitle) pdf.text(M, M + 16, subtitle, 9);
-    return M + (subtitle ? 34 : 24);
+    pdf.frect(0, 0, W, 7, BRAND); const top = 24, lh = 46; let x = M;
+    if (meta.logo) { const lw = Math.min(96, (meta.logo.w / meta.logo.h) * lh); pdf.image(M, top, lw, lh, meta.logo); x = M + lw + 12; }
+    const right = [meta.at && `Édité le ${meta.at}`, meta.by && `par ${meta.by}`, meta.period && `Période : ${meta.period}`].filter(Boolean);
+    const rw = Math.max(0, ...right.map((r) => approx(r, 8))) + 8;
+    if (meta.pharmacy) pdf.text(x, top + 10, fit(meta.pharmacy, avail - (x - M) - rw, 9, true), 9, true, GRAY);
+    pdf.text(x, top + 29, fit(title, avail - (x - M) - rw, 17, true), 17, true);
+    if (subtitle) pdf.text(x, top + 44, fit(subtitle, avail - (x - M) - rw, 10.5, true), 10.5, true, BRAND);
+    right.forEach((r, i) => pdf.text(W - M - approx(r, 8), top + 10 + i * 12, r, 8, false, GRAY));
+    const yb = top + lh + 10; pdf.frect(M, yb, avail, 1.2, BRAND); return yb + 20;
   };
-  let y = head(); const lh = 14;
+  let y = head(); const lh = 15;
   const header = () => {
-    pdf.rect(M, y - 10, avail, lh, 0.9); let x = M;
-    columns.forEach((c, i) => { pdf.text(c.money ? x + widths[i] - approx(c.label, 8, true) - 3 : x + 3, y, fit(c.label, widths[i] - 6, 8, true), 8, true); x += widths[i]; }); y += lh;
+    pdf.frect(M, y - 11, avail, lh + 1, BRAND); let x = M;
+    columns.forEach((c, i) => { pdf.text(c.money ? x + widths[i] - approx(c.label, 8, true) - 4 : x + 4, y, fit(c.label, widths[i] - 8, 8, true), 8, true, [1, 1, 1]); x += widths[i]; }); y += lh + 1;
   };
   header();
   let i = 0;
   for (const r of rows) {
-    if (y > H - M - 20) { pdf.newPage(); y = head(); header(); }
+    if (y > H - M - 28) { pdf.newPage(); y = head(); header(); }
+    if (i % 2) pdf.frect(M, y - 10.5, avail, lh, ZEBRA);
     let x = M;
-    columns.forEach((c, j) => { const v = fit(cell(c, r), widths[j] - 6, 8); pdf.text(c.money ? x + widths[j] - approx(v, 8) - 3 : x + 3, y, v, 8); x += widths[j]; });
-    pdf.line(M, y + 3.5, W - M, y + 3.5, 0.2); y += lh; i++;
+    columns.forEach((c, j) => { const v = fit(cell(c, r), widths[j] - 8, 8); pdf.text(c.money ? x + widths[j] - approx(v, 8) - 4 : x + 4, y, v, 8); x += widths[j]; });
+    y += lh; i++;
   }
-  if (!rows.length) pdf.text(M + 3, y, 'Aucune donnée sur la période.', 9);
-  if (footer) pdf.text(M, H - M + 10, footer, 7);
+  if (!rows.length) pdf.text(M + 4, y, 'Aucune donnée.', 9);
+  else if (withTotal) {
+    if (y > H - M - 28) { pdf.newPage(); y = head(); header(); }
+    pdf.line(M, y - 10, W - M, y - 10, 0.8); let x = M;
+    columns.forEach((c, j) => { if (j === 0) pdf.text(x + 4, y, 'Total', 8.5, true); else if (sums[j] !== null) { const v = money(sums[j], dec); pdf.text(x + widths[j] - approx(v, 8.5, true) - 4, y, v, 8.5, true); } x += widths[j]; }); y += lh;
+  }
+  const n = pdf.pages.length, foot = `${meta.pharmacy ? meta.pharmacy + ' — ' : ''}${title}${subtitle ? ' · ' + subtitle : ''}`;
+  pdf.pages.forEach((pg, k) => { pdf.cur = pg; pdf.line(M, H - 30, W - M, H - 30, 0.4);
+    pdf.text(M, H - 18, fit(foot, avail - 140, 7), 7, false, GRAY); const c = `${rows.length} ligne(s)${footer ? ' · ' + footer : ''}`; pdf.text(W / 2 + 40, H - 18, fit(c, 160, 7), 7, false, GRAY);
+    const pn = `Page ${k + 1} / ${n}`; pdf.text(W - M - approx(pn, 7), H - 18, pn, 7, false, GRAY); });
   return pdf.build();
 }
 
@@ -137,32 +158,78 @@ function zip(files) { // files: [{name, data(Buffer)}] — méthode 0 (stockage)
 const xml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
 const colName = (i) => (i >= 26 ? colName(Math.floor(i / 26) - 1) : '') + String.fromCharCode(65 + (i % 26));
 
-export function xlsx({ sheet = 'Export', columns, rows, dec = 3 }) {
-  const fmtCode = dec > 0 ? '0.' + '0'.repeat(dec) : '0';
-  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="${fmtCode}"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="3"><xf/><xf fontId="1" applyFont="1"/><xf numFmtId="164" applyNumberFormat="1"/></cellXfs></styleSheet>`;
-  const str = (r, c, v, s = 0) => `<c r="${colName(c)}${r}" t="inlineStr"${s ? ` s="${s}"` : ''}><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
-  let data = `<row r="1">${columns.map((c, i) => str(1, i, c.label, 1)).join('')}</row>`;
+// Classeur Excel personnalisé : bloc d'en-tête (logo, pharmacie, titre, sous-titre, date/auteur/période), tableau avec FILTRES et TRI automatiques
+// sur chaque colonne, volets figés, largeurs ajustées, nombres/montants numériques (triables), totaux dynamiques (SUBTOTAL : suivent les filtres),
+// impression paysage ajustée à la largeur avec titres répétés.
+// columns: [{key,label,money?,num?,dec?}] ; meta: { title, subtitle, pharmacy, by, at, period, logo:{buf,ext:'png'|'jpeg'} }
+export function xlsx({ sheet = 'Export', columns, rows, dec = 3, meta = null }) {
+  const NF = [0, 1, 2, 3, 4].map((d) => ({ id: 164 + d, code: d ? '#,##0.' + '0'.repeat(d) : '#,##0' }));
+  // styles : 0 défaut · 1 en-tête · 2 titre · 3 sous-titre · 4 méta · 5 pharmacie · 6 total (libellé) · 7 texte · 8..12 nombres (0-4 décimales) · 13..17 totaux (0-4 décimales)
+  const bd = '<border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD0D7D5"/></left><right style="thin"><color rgb="FFD0D7D5"/></right><top style="thin"><color rgb="FFD0D7D5"/></top><bottom style="thin"><color rgb="FFD0D7D5"/></bottom><diagonal/></border><border><left/><right/><top style="medium"><color rgb="FF0F766E"/></top><bottom/><diagonal/></border>';
+  const xf = (num, font, fill, border, align = '') => `<xf numFmtId="${num}" fontId="${font}" fillId="${fill}" borderId="${border}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"${align ? ` applyAlignment="1"><alignment ${align}/></xf>` : '/>'}`;
+  const xfs = [xf(0, 0, 0, 0), xf(0, 1, 2, 1, 'horizontal="left" vertical="center" wrapText="1"'), xf(0, 2, 0, 0), xf(0, 3, 0, 0), xf(0, 4, 0, 0), xf(0, 5, 0, 0), xf(0, 6, 0, 2), xf(0, 0, 0, 1, 'vertical="top"'),
+    ...NF.map((f) => xf(f.id, 0, 0, 1)), ...NF.map((f) => xf(f.id, 6, 0, 2))].join('');
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="${NF.length}">${NF.map((f) => `<numFmt numFmtId="${f.id}" formatCode="${f.code}"/>`).join('')}</numFmts>`
+    + `<fonts count="7"><font><sz val="10"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="18"/><name val="Calibri"/></font><font><b/><sz val="12"/><color rgb="FF0F766E"/><name val="Calibri"/></font><font><sz val="9"/><color rgb="FF667370"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FF667370"/><name val="Calibri"/></font><font><b/><sz val="10"/><name val="Calibri"/></font></fonts>`
+    + `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="3">${bd}</borders>`
+    + `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${8 + NF.length * 2}">${xfs}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const colDec = (c) => (c.money ? dec : Number.isInteger(c.dec) ? c.dec : null);
+  const C = (r, c, v, st) => `<c r="${colName(c)}${r}" t="inlineStr" s="${st}"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
+  const head0 = meta ? 6 : 1, last = columns.length - 1; let top = '';
+  if (meta) {
+    top += `<row r="1" ht="20" customHeight="1">${C(1, 0, meta.pharmacy || '', 5)}</row><row r="2" ht="28" customHeight="1">${C(2, 0, meta.title || sheet, 2)}</row>`;
+    top += `<row r="3" ht="20" customHeight="1">${meta.subtitle ? C(3, 0, meta.subtitle, 3) : ''}</row>`;
+    top += `<row r="4">${C(4, 0, [meta.at && `Édité le ${meta.at}`, meta.by && `par ${meta.by}`, meta.period && `Période : ${meta.period}`].filter(Boolean).join(' · '), 4)}</row>`;
+  }
+  let data = top + `<row r="${head0}" ht="24" customHeight="1">${columns.map((c, i) => C(head0, i, c.label, 1)).join('')}</row>`;
+  const first = head0 + 1;
   rows.forEach((row, ri) => {
-    data += `<row r="${ri + 2}">` + columns.map((c, i) => {
-      const v = row[c.key];
-      if (v === null || v === undefined || v === '') return '';
-      if (c.money && Number.isFinite(Number(v))) return `<c r="${colName(i)}${ri + 2}" s="2"><v>${Number(v) / Math.pow(10, dec)}</v></c>`;
-      if (typeof v === 'number' && Number.isFinite(v)) return `<c r="${colName(i)}${ri + 2}"><v>${v}</v></c>`;
+    const r = first + ri;
+    data += `<row r="${r}">` + columns.map((c, i) => {
+      const v = row[c.key]; const cd = colDec(c);
+      if (v === null || v === undefined || v === '') return `<c r="${colName(i)}${r}" s="7"/>`;
+      if (c.money && Number.isFinite(Number(v))) return `<c r="${colName(i)}${r}" s="${8 + dec}"><v>${Number(v) / Math.pow(10, dec)}</v></c>`;
+      if (typeof v === 'number' && Number.isFinite(v)) return `<c r="${colName(i)}${r}" s="${cd !== null ? 8 + Math.min(4, cd) : Number.isInteger(v) ? 8 : 7}"><v>${v}</v></c>`;
       let t = String(v); if (/^[=+\-@]/.test(t)) t = "'" + t; // pas de formules injectées
-      return str(ri + 2, i, t);
+      return C(r, i, t, 7);
     }).join('') + '</row>';
   });
-  const widths = columns.map((c, i) => `<col min="${i + 1}" max="${i + 1}" width="${Math.min(40, Math.max(10, c.label.length + 2, ...rows.slice(0, 100).map((r) => String(r[c.key] ?? '').length + 2)))}" customWidth="1"/>`).join('');
-  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths}</cols><sheetData>${data}</sheetData></worksheet>`;
-  const name = xml(sheet.replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || 'Export');
-  const F = (n, s) => ({ name: n, data: Buffer.from(s) });
-  return zip([
-    F('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'),
+  const lastData = first + rows.length - 1;
+  // totaux dynamiques : SUBTOTAL(109) ignore les lignes masquées par le filtre
+  const totCols = columns.map((c, i) => ((c.money || c.sum) && rows.length > 1 ? i : -1)).filter((i) => i >= 0);
+  let totRow = 0;
+  if (totCols.length) {
+    totRow = lastData + 1; data += `<row r="${totRow}">` + columns.map((c, i) => {
+      if (i === 0) return C(totRow, 0, 'Total', 6);
+      if (!totCols.includes(i)) return `<c r="${colName(i)}${totRow}" s="6"/>`;
+      const cd = c.money ? dec : Math.min(4, colDec(c) ?? 0), sum = rows.reduce((a, r) => a + (Number(r[c.key]) || 0), 0) / (c.money ? Math.pow(10, dec) : 1);
+      return `<c r="${colName(i)}${totRow}" s="${13 + cd}"><f>SUBTOTAL(109,${colName(i)}${first}:${colName(i)}${lastData})</f><v>${sum}</v></c>`;
+    }).join('') + '</row>';
+  }
+  const widths = columns.map((c, i) => `<col min="${i + 1}" max="${i + 1}" width="${Math.min(45, Math.max(11, c.label.length + 4, ...rows.slice(0, 150).map((r) => String(r[c.key] ?? '').length + 2)))}" customWidth="1"/>`).join('');
+  const lastCol = colName(last), ref = `A${head0}:${lastCol}${Math.max(lastData, head0)}`, name = xml(String(sheet).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || 'Export');
+  const logo = meta?.logo;
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><tabColor rgb="FF0F766E"/><pageSetUpPr fitToPage="1"/></sheetPr>`
+    + `<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${head0}" topLeftCell="A${head0 + 1}" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A${head0 + 1}" sqref="A${head0 + 1}"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${widths}</cols><sheetData>${data}</sheetData>`
+    + `<autoFilter ref="${ref}"/><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>`
+    + `<headerFooter><oddFooter>&amp;L${xml((meta?.pharmacy ? meta.pharmacy + ' — ' : '') + (meta?.title || sheet) + (meta?.subtitle ? ' · ' + meta.subtitle : ''))}&amp;RPage &amp;P / &amp;N</oddFooter></headerFooter>${logo ? '<drawing r:id="rId1"/>' : ''}</worksheet>`;
+  const F = (n, s) => ({ name: n, data: Buffer.isBuffer(s) ? s : Buffer.from(s) });
+  const ext = logo?.ext === 'jpeg' ? 'jpeg' : 'png';
+  const files = [
+    F('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${logo ? `<Default Extension="${ext}" ContentType="image/${ext}"/>` : ''}<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${logo ? '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' : ''}</Types>`),
     F('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
-    F('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets></workbook>`),
+    F('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'${name}'!$A$${head0}:$${lastCol}$${Math.max(lastData, head0)}</definedName><definedName name="_xlnm.Print_Titles" localSheetId="0">'${name}'!$${head0}:$${head0}</definedName></definedNames></workbook>`),
     F('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'),
     F('xl/styles.xml', styles), F('xl/worksheets/sheet1.xml', sheetXml),
-  ]);
+  ];
+  if (logo) {
+    files.push(F('xl/worksheets/_rels/sheet1.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>'));
+    files.push(F('xl/drawings/_rels/drawing1.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.${ext}"/></Relationships>`));
+    const px = 9525, hgt = 62, wid = Math.round(Math.min(150, (logo.w / logo.h) * hgt));
+    files.push(F('xl/drawings/drawing1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><xdr:oneCellAnchor><xdr:from><xdr:col>${last}</xdr:col><xdr:colOff>${6 * px}</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>${4 * px}</xdr:rowOff></xdr:from><xdr:ext cx="${wid * px}" cy="${hgt * px}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Logo" descr="Logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${wid * px}" cy="${hgt * px}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>`));
+    files.push(F(`xl/media/logo.${ext}`, logo.buf));
+  }
+  return zip(files);
 }
 
 export const toColumns = (cols) => cols.map((k) => ({ key: k, label: label(k), money: MONEY_COLS.has(k) }));

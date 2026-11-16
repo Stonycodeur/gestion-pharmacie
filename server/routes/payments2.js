@@ -1,5 +1,6 @@
 // Paiements v2 : catalogue mondial, réglages avancés (pays, devises, commissions, champs), options client, reçus (PDF, QR, e-mail),
 // remboursements, tableau de bord & exports, taux de change, versements aux établissements, journal antivirus, webhook générique.
+import { exportMeta } from '../exportmeta.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { router, audit, can, config, notify } from '../http.js';
 import { get, all, run, insert, tx, getSetting } from '../db.js';
@@ -167,9 +168,12 @@ router.get('/payments/export', { needsPharmacy: false }, (ctx) => {
   const rows = statRows(ctx).map((r) => ({ date: r.created_at, order: r.order_number, customer: r.customer, pharmacy: r.pharmacy, country: r.country, method: r.method, status: r.status, currency: r.currency, amount: +(r.amount / 10 ** r.dec).toFixed(r.dec), refunded: +(r.refunded / 10 ** r.dec).toFixed(r.dec), commission: +(r.commission / 10 ** r.dec).toFixed(r.dec), reference: r.provider_ref, ip: r.ip, risk: r.risk_score }));
   const cols = ['date', 'order', 'customer', 'pharmacy', 'country', 'method', 'status', 'currency', 'amount', 'refunded', 'commission', 'reference', 'ip', 'risk']; audit(ctx, 'payments.export', 'report', 'paiements', undefined, { rows: rows.length, format: fmt });
   const send = (type, name, buf) => { ctx.res.writeHead(200, { 'Content-Type': type, 'Content-Disposition': `attachment; filename="${name}"` }); ctx.res.end(buf); };
-  if (fmt === 'xlsx') return send('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'paiements.xlsx', xlsx({ sheet: 'Paiements', columns: cols.map((k) => ({ key: k, label: k })), rows, dec: 2 }));
-  if (fmt === 'pdf') return send('application/pdf', 'paiements.pdf', pdfTable({ title: 'Paiements en ligne', subtitle: `Édité le ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`, columns: ['date', 'pharmacy', 'method', 'status', 'currency', 'amount'].map((k) => ({ key: k, label: k, ...(k === 'amount' ? { align: 'right' } : {}) })), rows: rows.slice(0, 2000), dec: 2 }));
-  send('text/csv; charset=utf-8', 'paiements.csv', toCsv(rows, cols));
+  const L = { date: 'Date', order: 'Commande', customer: 'Client', pharmacy: 'Pharmacie', country: 'Pays', method: 'Moyen de paiement', status: 'Statut', currency: 'Devise', amount: 'Montant', refunded: 'Remboursé', commission: 'Commission', reference: 'Référence', ip: 'Adresse IP', risk: 'Risque' }, NUM = new Set(['amount', 'refunded', 'commission', 'risk']);
+  const meta = exportMeta(ctx, { page: 'Paiements', view: 'Paiements en ligne' }), file = `paiements-en-ligne-${new Date().toISOString().slice(0, 10)}`;
+  const send2 = (type, ext, buf) => send(type, `${file}.${ext}`, buf);
+  if (fmt === 'xlsx') return send2('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx', xlsx({ sheet: 'Paiements en ligne', columns: cols.map((k) => ({ key: k, label: L[k] || k, ...(NUM.has(k) ? { dec: k === 'risk' ? 0 : 2, sum: k !== 'risk' } : {}) })), rows, meta }));
+  if (fmt === 'pdf') return send2('application/pdf', 'pdf', pdfTable({ title: meta.title, subtitle: meta.subtitle, columns: ['date', 'pharmacy', 'method', 'status', 'currency', 'amount'].map((k) => ({ key: k, label: L[k] })), rows: rows.slice(0, 5000), meta: { ...meta, totals: false }, footer: rows.length > 5000 ? 'PDF limité à 5000 lignes (Excel : tout)' : '' }));
+  send('text/csv; charset=utf-8', `${file}.csv`, toCsv(rows, cols));
 });
 
 // ---------- taux de change ----------

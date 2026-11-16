@@ -3,6 +3,7 @@ import { get, all } from '../db.js';
 import { bad, toCsv, todaySql, addDays } from '../util.js';
 import { computeAlerts } from '../alerts.js';
 import { pdfTable, xlsx, toColumns } from '../export.js';
+import { exportMeta, EXPORT_VIEWS } from '../exportmeta.js';
 
 const range = (q) => { const from = q.from || addDays(todaySql(), -29).slice(0, 10), to = q.to || todaySql(); if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw bad('VALIDATION', 'Dates invalides'); return { from, to: to + ' 23:59:59' }; };
 // Chiffre d'affaires net = ventes − remboursements ; marge = HT net − coût des lots vendus (net des retours)
@@ -18,18 +19,33 @@ function salesRows(ph, from, to, group) {
   return [...m.values()].sort((a, b) => a.period.localeCompare(b.period));
 }
 const TITLES = { ventes: 'Ventes', paiements: 'Paiements', top_produits: 'Meilleures ventes', valorisation_stock: 'Valorisation du stock', peremptions: 'Péremptions', pertes: 'Pertes et casse', caisses: 'Sessions de caisse', taxes: 'TVA collectée', z_report: 'Rapport Z' };
-// Export CSV / Excel / PDF — journalisé (donnée sensible), réservé à reports.export
+// Export CSV / Excel / PDF — journalisé (donnée sensible), réservé à reports.export. Titre = page, sous-titre = vue exportée (« Rapports › Ventes »).
 function sendCsv(ctx, name, rows, cols) {
   need(ctx, 'reports.export'); const fmt = ctx.query.format; audit(ctx, 'report.export', 'report', name, undefined, { rows: rows.length, format: fmt, query: ctx.query });
-  const dec = get('SELECT currency_decimals d FROM pharmacies WHERE id=?', ctx.ph).d, c = toColumns(cols);
-  if (fmt === 'xlsx') { ctx.res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${name}.xlsx"` }); return ctx.res.end(xlsx({ sheet: TITLES[name] || name, columns: c, rows, dec })); }
+  const dec = get('SELECT currency_decimals d FROM pharmacies WHERE id=?', ctx.ph).d, c = toColumns(cols), [page, view] = EXPORT_VIEWS[name] || [TITLES[name] || name, ''], meta = exportMeta(ctx, { page, view });
+  const file = `${name}-${todaySql().slice(0, 10)}`;
+  if (fmt === 'xlsx') { ctx.res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${file}.xlsx"` }); return ctx.res.end(xlsx({ sheet: view || page, columns: c, rows, dec, meta })); }
   if (fmt === 'pdf') {
-    const ph = get('SELECT name,currency FROM pharmacies WHERE id=?', ctx.ph);
-    ctx.res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${name}.pdf"` });
-    return ctx.res.end(pdfTable({ title: `${TITLES[name] || name} — ${ph.name}`, subtitle: `Édité le ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC · montants en ${ph.currency}${ctx.query.from ? ` · du ${ctx.query.from} au ${ctx.query.to || ''}` : ''}`, columns: c, rows, dec, footer: `${rows.length} ligne(s)` }));
+    ctx.res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${file}.pdf"` });
+    return ctx.res.end(pdfTable({ title: page, subtitle: view, columns: c, rows, dec, footer: meta.currency ? `montants en ${meta.currency}` : '', meta: { ...meta, logo: meta.logo } }));
   }
-  ctx.res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}.csv"` }); ctx.res.end(toCsv(rows, cols));
+  ctx.res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${file}.csv"` }); ctx.res.end(toCsv(rows, cols));
 }
+// Export d'un tableau affiché à l'écran (n'importe quelle page) : le client envoie ce qu'il montre (lignes filtrées), le serveur met en forme.
+router.post('/export/grid', { needsPharmacy: false, bodyLimit: 6 * 1024 * 1024 }, (ctx) => {
+  const b = ctx.body || {}, fmt = ['xlsx', 'pdf'].includes(b.format) ? b.format : null; if (!fmt) throw bad('VALIDATION', 'Format invalide');
+  const head = Array.isArray(b.head) ? b.head.slice(0, 60).map((x) => String(x ?? '').slice(0, 80)) : [], data = Array.isArray(b.data) ? b.data.slice(0, 20000) : [];
+  if (!head.length) throw bad('VALIDATION', 'Aucune colonne');
+  const dcs = Array.isArray(b.dec) ? b.dec : [], columns = head.map((label, i) => ({ key: i, label: label || `Col. ${i + 1}`, dec: Number.isInteger(dcs[i]) ? Math.min(4, Math.max(0, dcs[i])) : null, num: false }));
+  const rows = data.map((r) => (Array.isArray(r) ? r : []).slice(0, head.length).map((v) => (typeof v === 'number' && Number.isFinite(v) ? v : String(v ?? '').slice(0, 500))));
+  const asObj = rows.map((r) => Object.fromEntries(r.map((v, i) => [i, v])));
+  const meta = exportMeta(ctx, { page: String(b.title || 'Export').slice(0, 80), view: String(b.subtitle || '').slice(0, 80), period: String(b.period || '').slice(0, 80) });
+  audit(ctx, 'grid.export', 'export', String(b.title || '').slice(0, 60), undefined, { rows: rows.length, format: fmt });
+  const file = `${String(b.title || 'export').replace(/[^\w\-]+/g, '_').slice(0, 30)}${b.subtitle ? '-' + String(b.subtitle).replace(/[^\w\-]+/g, '_').slice(0, 30) : ''}-${todaySql().slice(0, 10)}`;
+  const buf = fmt === 'xlsx' ? xlsx({ sheet: meta.subtitle || meta.title, columns: columns.map((c) => ({ ...c, sum: Array.isArray(b.sums) && b.sums.includes(c.key) })), rows: asObj, meta })
+    : pdfTable({ title: meta.title, subtitle: meta.subtitle, columns, rows: asObj, meta, footer: '' });
+  ctx.res.writeHead(200, { 'Content-Type': fmt === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf', 'Content-Disposition': `attachment; filename="${file}.${fmt}"` }); ctx.res.end(buf);
+});
 export { sendCsv };
 const out = (ctx, name, rows, cols) => (['csv', 'xlsx', 'pdf'].includes(ctx.query.format) ? sendCsv(ctx, name, rows, cols) : { data: rows });
 router.get('/reports/sales', { perm: 'reports.view' }, (ctx) => { const { from, to } = range(ctx.query); const r = salesRows(ctx.ph, from, to, ctx.query.group); return out(ctx, 'ventes', r, ['period', 'tickets', 'gross', 'discount', 'tax', 'refunded', 'net', 'cost', 'margin']); });
