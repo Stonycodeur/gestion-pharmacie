@@ -24,12 +24,14 @@ const NAV = [
   ['-', 'Patients'], ['deliveries', 'Livraisons', 'deliveries.view'], ['prescriptions', 'Ordonnances', 'prescriptions.view'], ['customers', 'Clients', 'customers.view'], ['orders', 'Commandes', 'orders.view'],
   ['-', 'Pilotage'], ['reports', 'Rapports', 'reports.view'], ['forecast', 'Prévisions', 'forecast.view'], ['accounting', 'Comptabilité', 'accounting.view'], ['finance', 'Finance & API', 'finance.admin'], ['operations', 'Opérations', 'transfers.manage|transfers.receive|supplier_returns.manage|supplier_payments.manage|accounting.view'],
   ['-', 'Administration'], ['users', 'Utilisateurs', 'users.manage'], ['roles', 'Rôles & droits', 'users.manage'], ['audit', 'Journal d\'audit', 'audit.view'], ['settings', 'Paramètres', 'settings.manage'],
-  ['-', 'Réseau'], ['help', 'Centre d\'aide', 'help.view|portal.use'], ['files', 'Fichiers', 'files.view'], ['network', 'Établissements & pays', 'pharmacies.manage'], ['trash', 'Corbeille', 'trash.manage'],
+  ['-', 'Réseau'], ['help', 'Centre d\'aide', 'help.view|portal.use|driver.use'], ['files', 'Fichiers', 'files.view'], ['network', 'Établissements & pays', 'pharmacies.manage'], ['trash', 'Corbeille', 'trash.manage'],
   ['driver', 'Espace chauffeur', 'driver.use'], ['doctor', 'Espace médecin', 'doctor.use'],
   ['portal', 'Mon espace', 'portal.use|portal.guest'], ['discover', 'Pharmacies', 'portal.use|portal.guest'],
 ];
 const EXTRA = { security: 'Sécurité', profile: 'Mon profil' };
 const allowed = (perm) => !perm || perm.split('|').some(can);
+// Une vue du menu exige le droit « view.<id> » (Rôles & droits) ET la fonction correspondante.
+const navOk = (id, perm) => can('view.' + id) && allowed(perm);
 let current = null, sse = null;
 
 // ---------- connexion ----------
@@ -127,7 +129,7 @@ const initials = (n) => (n || '?').split(/\s+/).map((x) => x[0]).slice(0, 2).joi
 function dropdown(btn, content) { const box = h('div', { class: 'dropdown', hidden: true }, content); const wrap = h('div', { class: 'bell' }, btn, box); btn.addEventListener('click', (e) => { e.stopPropagation(); const open = box.hidden; document.querySelectorAll('.dropdown').forEach((d) => (d.hidden = true)); box.hidden = !open; }); return { wrap, box }; }
 function shell() {
   clear(app);
-  const items = NAV.filter(([id, , perm]) => id === '-' || allowed(perm));
+  const items = NAV.filter(([id, , perm]) => id === '-' || navOk(id, perm));
   const nav = h('nav', { class: 'nav', 'aria-label': 'Navigation principale' });
   for (const [id, label] of items) {
     if (id === '-') { nav.append(h('div', { class: 'grp' }, t(label))); continue; }
@@ -233,7 +235,7 @@ async function render() {
   const box = document.getElementById('content'); if (!box) return;
   document.querySelectorAll('.nav a,.tabbar a').forEach((a) => (a.dataset.id === id ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
   const nm = NAV.find(([n]) => n === id)?.[1] || EXTRA[id] || ''; if (titleEl) titleEl.textContent = nm ? t(nm) : appName(); document.title = (nm ? t(nm) + ' · ' : '') + appName();
-  const known = !!EXTRA[id] || NAV.some(([n, , p]) => n === id && allowed(p));
+  const known = !!EXTRA[id] || NAV.some(([n, , p]) => n === id && navOk(n, p));
   if (!known) { clear(box).append(h('div', { class: 'alert bad' }, 'Page indisponible ou accès refusé.')); return; }
   clear(box).append(skeleton(5));
   const token = (current = Symbol());

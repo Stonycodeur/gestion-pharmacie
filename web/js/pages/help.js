@@ -7,7 +7,7 @@ import { onEvent } from '../events.js';
 
 const KIND = { message: 'Message', claim: 'Réclamation', interpharmacy: 'Entre pharmacies' };
 const ST = { open: ['Ouvert', 'warn'], answered: ['Répondu', 'ok'], closed: ['Clôturé', ''] };
-const isCustomer = () => can('portal.use') && !can('help.view');
+const isCustomer = () => (can('portal.use') || can('driver.use')) && !can('help.view'); // client ou chauffeur : mode « utilisateur » (écrire à une pharmacie, suivre ses conversations)
 
 export default async function (box) {
   const body = h('div'); const customer = isCustomer(); let tab = 'in';
@@ -21,7 +21,7 @@ export default async function (box) {
   const t0 = new URLSearchParams(location.hash.split('?')[1] || '').get('ticket'); if (t0) openTicket(Number(t0), customer, draw);
 }
 
-async function pharmaciesFor(customer) { return customer ? get('/public/pharmacies') : get('/inter/pharmacies'); }
+async function pharmaciesFor(customer) { return customer ? (can('driver.use') ? get('/driver/pharmacies') : get('/public/pharmacies')) : get('/inter/pharmacies'); }
 export async function compose(customer, done, preset = {}) {
   const phs = await pharmaciesFor(customer); const pick = filePicker({ label: 'Pièce jointe (photo ou PDF, 3 Mo max) — aperçu avant envoi' });
   formModal(customer ? 'Nouveau message' : 'Contacter une pharmacie', [

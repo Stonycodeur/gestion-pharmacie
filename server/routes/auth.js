@@ -1,3 +1,4 @@
+import { qrSvg } from '../qr.js';
 import { reviveExpired } from '../account-status.js';
 import { router, config, audit, can } from '../http.js';
 import { get, all, run, insert, tx } from '../db.js';
@@ -115,7 +116,9 @@ router.post('/auth/change-password', { allowMfaPending: true, needsPharmacy: fal
 router.post('/auth/mfa/setup', { allowMfaPending: true, needsPharmacy: false, ok200: true }, (ctx) => {
   const secret = newTotpSecret();
   run('UPDATE users SET mfa_secret=?, mfa_enabled=0 WHERE id=?', secret, ctx.user.id);
-  return { secret, otpauth: `otpauth://totp/Gestion_pharmacie:${encodeURIComponent(ctx.user.email)}?secret=${secret}&issuer=Gestion_pharmacie` };
+  const otpauth = `otpauth://totp/Gestion_pharmacie:${encodeURIComponent(ctx.user.email)}?secret=${secret}&issuer=Gestion_pharmacie`;
+  let qr_svg = null; try { qr_svg = qrSvg(otpauth, { size: 220, margin: 3 }); } catch { /* e-mail très long : saisie manuelle du secret */ }
+  return { secret, otpauth, qr_svg };
 });
 router.post('/auth/mfa/enable', { allowMfaPending: true, needsPharmacy: false, ok200: true }, (ctx) => {
   const u = get('SELECT * FROM users WHERE id=?', ctx.user.id);

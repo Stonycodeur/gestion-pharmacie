@@ -144,6 +144,30 @@ router.get('/deliveries/:id/offers', { perm: 'deliveries.view' }, (ctx) => { // 
   return all("SELECT o.*, d.name,d.photo_file,d.vehicle_type,d.vehicle,d.plate,d.rating_sum,d.rating_count,d.id did FROM delivery_offers o JOIN drivers d ON d.id=o.driver_id WHERE o.delivery_id=? ORDER BY o.id", x.id).map((o) => pubOffer(o, { ...o, id: o.did }, ph));
 });
 
+// Compte chauffeur (Utilisateurs) : choix de PLUSIEURS pharmacies. Le chauffeur voit et accepte alors les courses des clients de chacune d'elles.
+// Super-administrateur : toutes les pharmacies ; administrateur : peut rattacher les chauffeurs de sa pharmacie à n'importe quelle pharmacie active (la pharmacie ajoutée est prévenue, tout est journalisé).
+const driverOfUser = (ctx) => {
+  const d = get("SELECT d.* FROM drivers d WHERE d.user_id=? AND d.status != 'deleted'", ctx.params.id); if (!d) throw notFound('Profil chauffeur');
+  if (ctx.user.role !== 'super_admin' && !isAffiliated(d, ctx.ph)) throw notFound('Profil chauffeur'); return d;
+};
+router.get('/driver/pharmacies', { perm: 'driver.use', needsPharmacy: false }, (ctx) => driverPharmacies(meDriver(ctx)).map((p) => ({ id: p.id, name: p.name, home: p.home })));
+router.get('/users/:id/driver-pharmacies', { anyPerm: ['users.manage', 'drivers.admin'], needsPharmacy: false }, (ctx) => {
+  const d = driverOfUser(ctx);
+  return { driver_id: d.id, name: d.name, home_pharmacy_id: d.pharmacy_id, selected: driverPharmacies(d).map((p) => p.id), pharmacies: all("SELECT id,name,city FROM pharmacies WHERE status='active' ORDER BY name") };
+});
+router.put('/users/:id/driver-pharmacies', { anyPerm: ['users.manage', 'drivers.admin'], needsPharmacy: false, ok200: true }, (ctx) => tx(() => {
+  const d = driverOfUser(ctx); const ids = [...new Set((Array.isArray(ctx.body.pharmacy_ids) ? ctx.body.pharmacy_ids : []).map(Number).filter(Boolean))];
+  for (const id of ids) if (!get("SELECT 1 FROM pharmacies WHERE id=? AND status='active'", id)) throw bad('VALIDATION', 'Pharmacie introuvable ou désactivée');
+  if (!ids.includes(d.pharmacy_id)) ids.push(d.pharmacy_id); // la pharmacie principale reste toujours rattachée
+  const before = driverPharmacies(d).map((p) => p.id), added = ids.filter((i) => !before.includes(i)), removed = before.filter((i) => !ids.includes(i));
+  for (const pid of added) run('INSERT INTO driver_pharmacies(driver_id,pharmacy_id) VALUES (?,?)', d.id, pid);
+  for (const pid of removed) run('DELETE FROM driver_pharmacies WHERE driver_id=? AND pharmacy_id=?', d.id, pid);
+  for (const pid of added) notify({ pharmacyId: pid, audience: 'staff', kind: 'delivery', title: `Chauffeur ${d.name} rattaché à votre pharmacie`, body: 'Il peut désormais voir et accepter les courses de vos clients.', link: '#/deliveries' });
+  if (d.user_id && (added.length || removed.length)) notify({ pharmacyId: d.pharmacy_id, userId: d.user_id, kind: 'delivery', title: 'Vos pharmacies de rattachement ont changé', body: `${ids.length} pharmacie(s) : vous recevez les courses de leurs clients.`, link: '#/driver' });
+  audit(ctx, 'driver.affiliations', 'driver', d.id, { pharmacies: before }, { pharmacies: ids });
+  return { ok: true, selected: ids };
+}));
+
 // ---------- affectations multi-pharmacies ----------
 router.put('/drivers/:id/pharmacies', { perm: 'drivers.admin', ok200: true }, (ctx) => tx(() => {
   const d = ctx.user.role === 'super_admin' ? get('SELECT * FROM drivers WHERE id=?', ctx.params.id) : get('SELECT d.* FROM drivers d WHERE d.id=? AND ' + AFF, ctx.params.id, ctx.ph, ctx.ph); if (!d) throw notFound('Chauffeur');

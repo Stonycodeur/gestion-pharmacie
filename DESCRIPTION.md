@@ -189,3 +189,11 @@ Au premier lancement la base est vide : l'écran « Première configuration » c
 - Rapports : nouvel onglet **Analyse** (par défaut) via `GET /reports/analytics` : indicateurs (CA net, tickets, panier moyen, marge HT, remboursé) comparés à la période précédente, courbe/aires/barres avec période précédente en pointillé, heures de pointe, jours de la semaine, modes de paiement (anneau), meilleures ventes.
 - Personnalisation (mémorisée sur le compte, préférence `reports_ui`) : blocs affichés et leur ordre, période (7/30/90 j/12 mois), regroupement jour/mois, indicateur, type de courbe, comparaison, réinitialisation.
 - Test : `tests/views.test.js` (7 tests).
+
+## 2FA par QR code, aide chauffeur, chauffeur multi-pharmacies, vues dans Rôles & droits
+
+- **2FA** : `POST /auth/mfa/setup` renvoie aussi `qr_svg` (QR généré localement par `server/qr.js`, aucun service externe) ; la page Sécurité l'affiche (scan avec Google/Microsoft Authenticator, Aegis, FreeOTP…) avec repli « saisir la clé » et lien `otpauth://` pour mobile.
+- **Centre d'aide ouvert au chauffeur** : le chauffeur écrit (message ou réclamation) aux pharmacies auxquelles il est rattaché, suit ses conversations et répond ; le serveur refuse toute autre pharmacie. `GET /driver/pharmacies` alimente la liste.
+- **Chauffeur multi-pharmacies** : Utilisateurs › compte chauffeur › « Pharmacies rattachées… » (liste à cocher avec recherche). `GET/PUT /users/:id/driver-pharmacies` (super-admin et administrateur, droit `users.manage` ou `drivers.admin`) : le chauffeur voit et accepte les courses des clients de toutes ces pharmacies ; la pharmacie principale reste toujours rattachée ; chaque pharmacie ajoutée est prévenue (notification), le chauffeur aussi ; tout est audité.
+- **Vues dans Rôles & droits** : une permission `view.<vue>` par entrée du menu (29 vues : tableau de bord, caisse, ventes… espace chauffeur/médecin/client). Un menu s'affiche si le rôle a la vue ET la fonction correspondante ; les fonctions restent contrôlées côté serveur. À la mise à jour, les vues sont accordées automatiquement aux rôles (même personnalisés) qui avaient déjà la fonction : aucun menu ne disparaît. La matrice est groupée « Vues » / « Fonctions ». Sécurité et Mon profil restent toujours accessibles (compte personnel).
+- Tests : `tests/views.test.js` (8 tests).

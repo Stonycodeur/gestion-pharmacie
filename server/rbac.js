@@ -24,8 +24,23 @@ export const PERMISSIONS = {
   'sales.credit': 'Vente à crédit / reste à payer', 'sales.deposit': 'Acomptes sur commandes', 'accounting.lock': 'Clôturer / verrouiller une période',
   'deliveries.view': 'Voir les livraisons', 'deliveries.manage': 'Gérer les livraisons (lancer, affecter)', 'drivers.admin': 'Créer et modifier les chauffeurs (comptes, tarifs, affectations)', 'finance.admin': 'Abonnements, KYC, clés API, webhooks et SMS (paramétrage financier)', 'rfq.manage': 'Demandes de prix fournisseurs', 'accounting.manage': 'Saisir des écritures comptables', 'forecast.view': 'Prévisions et analyses de stock',
 };
+
+// Vues de l'application : chaque entrée du menu est un droit « view.* » modifiable par rôle dans Rôles & droits.
+// Un menu n'apparaît que si le rôle a la vue ET la fonction correspondante (les droits « fonction » protègent les données côté serveur).
+export const VIEWS = {
+  dashboard: ['Tableau de bord', 'dashboard.view'], pos: ['Caisse / Vente', 'sales.create'], sales: ['Ventes', 'sales.view'], cash: ['Ma caisse', 'cash.use|cash.view_all'],
+  products: ['Produits', 'products.view'], stock: ['Stock', 'stock.view'], purchases: ['Achats', 'purchases.view'], inventory: ['Inventaires', 'inventory.manage'],
+  deliveries: ['Livraisons', 'deliveries.view'], prescriptions: ['Ordonnances', 'prescriptions.view'], customers: ['Clients', 'customers.view'], orders: ['Commandes', 'orders.view'],
+  reports: ['Rapports', 'reports.view'], forecast: ['Prévisions', 'forecast.view'], accounting: ['Comptabilité', 'accounting.view'], finance: ['Finance & API', 'finance.admin'],
+  operations: ['Opérations', 'transfers.manage|transfers.receive|supplier_returns.manage|supplier_payments.manage|accounting.view'],
+  users: ['Utilisateurs', 'users.manage'], roles: ['Rôles & droits', 'users.manage'], audit: ['Journal d\'audit', 'audit.view'], settings: ['Paramètres', 'settings.manage'],
+  help: ['Centre d\'aide', 'help.view|portal.use|driver.use'], files: ['Fichiers', 'files.view'], network: ['Établissements & pays', 'pharmacies.manage'], trash: ['Corbeille', 'trash.manage'],
+  driver: ['Espace chauffeur', 'driver.use'], doctor: ['Espace médecin', 'doctor.use'], portal: ['Mon espace (client)', 'portal.use|portal.guest'], discover: ['Pharmacies (client)', 'portal.use|portal.guest'],
+};
+for (const [id, [label]] of Object.entries(VIEWS)) PERMISSIONS['view.' + id] = 'Vue : ' + label;
+const viewOk = (perms, id) => VIEWS[id][1].split('|').some((p) => perms.includes(p));
 const P = Object.keys(PERMISSIONS);
-const SPECIAL = ['portal.use', 'portal.browse', 'portal.guest', 'driver.use', 'doctor.use'];
+const SPECIAL = ['portal.use', 'portal.browse', 'portal.guest', 'driver.use', 'doctor.use', 'view.driver', 'view.doctor', 'view.portal', 'view.discover'];
 const except = (...x) => P.filter((p) => !x.includes(p) && !SPECIAL.includes(p));
 
 export const ROLES = {
@@ -63,6 +78,8 @@ export const ROLES = {
   doctor: { label: 'Médecin', privileged: 0, perms: ['doctor.use'] },
 };
 
+for (const [code, r] of Object.entries(ROLES)) if (code !== 'super_admin') { r.perms = r.perms.filter((p) => !p.startsWith('view.')); for (const id of Object.keys(VIEWS)) if (viewOk(r.perms, id)) r.perms.push('view.' + id); }
+
 export const DEFAULT_SETTINGS = { expiry_warning_days: 90, stock_method: 'FEFO', max_discount_percent: 10, refund_approval_threshold: 50000, reservation_hours: 24, loyalty_points_per_unit: 1, prescription_validity_days: 90, min_days_before_expiry_sale: 0, temp_min: 2, temp_max: 8, credit_limit: 0, brand_color: '#0f766e', brand_name: '' };
 export function seedRbac() {
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) run('INSERT OR IGNORE INTO settings(pharmacy_id,skey,svalue) VALUES (0,?,?)', k, String(v));
@@ -74,6 +91,15 @@ export function seedRbac() {
       for (const p of r.perms) run('INSERT OR IGNORE INTO role_permissions(role_code,permission_code) VALUES (?,?)', code, p);
     else // mise à jour de version : les NOUVELLES permissions sont accordées aux rôles par défaut concernés, sans toucher aux réglages existants
       for (const p of r.perms) if (fresh.includes(p)) run('INSERT OR IGNORE INTO role_permissions(role_code,permission_code) VALUES (?,?)', code, p);
+  }
+  // Mise à jour de version : les nouvelles vues sont accordées aux rôles (y compris personnalisés) qui avaient déjà la fonction correspondante → aucun menu ne disparaît.
+  for (const code of fresh.filter((c) => c.startsWith('view.'))) {
+    const id = code.slice(5); if (!VIEWS[id]) continue;
+    for (const r of all('SELECT code FROM roles')) {
+      if (r.code === 'super_admin') { if (!SPECIAL.includes(code)) run('INSERT OR IGNORE INTO role_permissions(role_code,permission_code) VALUES (?,?)', r.code, code); continue; }
+      const has = all('SELECT permission_code p FROM role_permissions WHERE role_code=?', r.code).map((x) => x.p);
+      if (viewOk(has, id)) run('INSERT OR IGNORE INTO role_permissions(role_code,permission_code) VALUES (?,?)', r.code, code);
+    }
   }
   reloadPerms();
 }

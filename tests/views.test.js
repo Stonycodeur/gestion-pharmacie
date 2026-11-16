@@ -120,3 +120,29 @@ test('rapports : analyse (indicateurs, comparaison, heures, jours) et flux /even
   const d = await mkDriver(adm, '6');
   for (const tk of [d.t, cl, adm]) { const ac = new AbortController(); const res = await fetch(base + '/events', { headers: { authorization: 'Bearer ' + tk }, signal: ac.signal }); assert.equal(res.status, 200); ac.abort(); }
 });
+
+test('2FA par QR code, aide ouverte au chauffeur, chauffeur multi-pharmacies et vues gérées dans Rôles & droits', async () => {
+  const adm = await login('admin'), sa = await login('superadmin');
+  // QR code de la double authentification (SVG généré localement, aucun service externe)
+  const cl = (await call('POST', '/users', { name: 'Mfa Test', email: 'mfa@t.local', role_code: 'cashier', pharmacy_id: 1, password: PW2 }, sa)); assert.equal(cl.status, 201);
+  const mt = (await call('POST', '/auth/login', { email: 'mfa@t.local', password: PW2 })).body.access_token;
+  const su = await call('POST', '/auth/mfa/setup', {}, mt); assert.equal(su.status, 200); assert.match(su.body.qr_svg, /^<svg[^>]+viewBox/); assert.ok(su.body.otpauth.startsWith('otpauth://totp/') && su.body.secret);
+  // chauffeur : aide + plusieurs pharmacies
+  const d = await mkDriver(adm, '4'); const du = (await call('GET', '/users?q=drv4', null, adm)).body; const uid = (du.data || du).find((x) => x.email === 'drv4@t.local').id;
+  const p2 = (await call('POST', '/pharmacies', { name: 'Annexe Multi', currency: 'TND', currency_decimals: 3 }, sa)).body.id, p3 = (await call('POST', '/pharmacies', { name: 'Autre Multi', currency: 'TND', currency_decimals: 3 }, sa)).body.id;
+  assert.equal((await call('POST', '/help/tickets', { pharmacy_id: p2, subject: 'Bonjour', body: 'Test' }, d.t)).status, 403, 'pas encore rattaché');
+  const cfg = await call('GET', `/users/${uid}/driver-pharmacies`, null, adm); assert.equal(cfg.status, 200); assert.ok(cfg.body.pharmacies.length >= 3); assert.deepEqual(cfg.body.selected, [1]);
+  const put = await call('PUT', `/users/${uid}/driver-pharmacies`, { pharmacy_ids: [p2] }, adm); assert.equal(put.status, 200, JSON.stringify(put.body)); assert.deepEqual(put.body.selected.sort(), [1, p2].sort(), 'la pharmacie principale reste rattachée');
+  assert.deepEqual((await call('GET', '/driver/pharmacies', null, d.t)).body.map((x) => x.id).sort(), [1, p2].sort());
+  const tk = await call('POST', '/help/tickets', { pharmacy_id: p2, subject: 'Question course', body: 'Bonjour, une question' }, d.t); assert.equal(tk.status, 201, JSON.stringify(tk.body));
+  assert.equal((await call('POST', '/help/tickets', { pharmacy_id: p3, subject: 'x', body: 'y' }, d.t)).status, 403, 'pharmacie non rattachée');
+  assert.equal((await call('GET', '/help/tickets', null, d.t)).body.length, 1); assert.equal((await call('POST', `/help/tickets/${tk.body.id}/messages`, { body: 'Suite' }, d.t)).status, 201);
+  assert.equal((await call('GET', `/users/${uid}/driver-pharmacies`, null, (await call('POST', '/auth/login', { email: 'client@demo.local', password: PW })).body.access_token)).status, 403);
+  assert.equal((await call('PUT', `/users/${uid}/driver-pharmacies`, { pharmacy_ids: [] }, sa)).body.selected.length, 1, 'retrait des rattachements annexes');
+  // vues dans Rôles & droits : une vue par entrée de menu, accordée selon les fonctions du rôle
+  const roles = (await call('GET', '/roles', null, adm)).body; const views = roles.permissions.filter((p) => p.code.startsWith('view.')); assert.ok(views.length >= 25);
+  const by = Object.fromEntries(roles.roles.map((r) => [r.code, new Set(r.permissions)]));
+  assert.ok(by.cashier.has('view.pos') && !by.cashier.has('view.reports') && !by.cashier.has('view.users')); assert.ok(by.driver.has('view.driver') && by.driver.has('view.help') && !by.driver.has('view.dashboard')); assert.ok(by.customer.has('view.portal'));
+  assert.ok((await call('GET', '/auth/me', null, adm)).body.permissions.includes('view.reports'));
+  const me = (await call('POST', '/auth/login', { email: 'drv4@t.local', password: PW2 })).body; assert.ok(me.permissions.includes('view.driver') && me.permissions.includes('view.help'));
+});

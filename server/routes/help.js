@@ -4,6 +4,7 @@ import { get, all, run, insert, tx, nextNumber } from '../db.js';
 import { bad, notFound, forbidden, conflict, str, oneOf } from '../util.js';
 import { savePrivate, readPrivate } from '../files.js';
 import { haversineKm } from './discover.js';
+import { isAffiliated } from './drivers.js';
 
 const isSuper = (ctx) => ctx.user.role === 'super_admin';
 const isStaff = (ctx) => !['customer', 'guest', 'driver'].includes(ctx.user.role);
@@ -20,9 +21,10 @@ function loadTicket(ctx, id) {
 }
 const view = (t) => ({ ...t, pharmacy_name: phName(t.pharmacy_id), from_pharmacy_name: t.from_pharmacy_id ? phName(t.from_pharmacy_id) : null, from_name: get('SELECT name FROM users WHERE id=?', t.from_user_id)?.name });
 
-router.post('/help/tickets', { anyPerm: ['portal.use', 'help.reply', 'inter.search'], needsPharmacy: false, bodyLimit: 8e6 }, (ctx) => {
+router.post('/help/tickets', { anyPerm: ['portal.use', 'driver.use', 'help.reply', 'inter.search'], needsPharmacy: false, bodyLimit: 8e6 }, (ctx) => {
   const b = ctx.body, staff = isStaff(ctx);
   const target = get("SELECT id FROM pharmacies WHERE id=? AND status='active'", Number(b.pharmacy_id)); if (!target) throw bad('VALIDATION', 'Pharmacie destinataire requise');
+  if (!staff && ctx.user.role === 'driver') { const d = get("SELECT * FROM drivers WHERE user_id=? AND status='active'", ctx.user.id); if (!d || !isAffiliated(d, target.id)) throw forbidden('Vous ne pouvez écrire qu\'aux pharmacies auxquelles vous êtes rattaché'); }
   const kind = staff ? 'interpharmacy' : oneOf(b.kind || 'message', 'type', ['message', 'claim']);
   if (staff && (!can(ctx.user, 'inter.search') || !myPh(ctx))) throw forbidden();
   if (staff && target.id === myPh(ctx)) throw bad('VALIDATION', 'Choisissez une autre pharmacie');
@@ -38,7 +40,7 @@ router.post('/help/tickets', { anyPerm: ['portal.use', 'help.reply', 'inter.sear
     audit({ ...ctx, ph: target.id }, 'help.create', 'help_ticket', id, undefined, { kind, subject }); return { id, number };
   });
 });
-router.get('/help/tickets', { anyPerm: ['portal.use', 'help.view'], needsPharmacy: false }, (ctx) => {
+router.get('/help/tickets', { anyPerm: ['portal.use', 'driver.use', 'help.view'], needsPharmacy: false }, (ctx) => {
   const w = [], p = [];
   if (isStaff(ctx) && !isSuper(ctx)) {
     if (!can(ctx.user, 'help.view')) throw forbidden();
@@ -48,7 +50,7 @@ router.get('/help/tickets', { anyPerm: ['portal.use', 'help.view'], needsPharmac
   if (ctx.query.status) { w.push('status=?'); p.push(ctx.query.status); } if (ctx.query.kind) { w.push('kind=?'); p.push(ctx.query.kind); }
   return all(`SELECT * FROM help_tickets ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY updated_at DESC, id DESC LIMIT 300`, ...p).map(view);
 });
-router.get('/help/tickets/:id', { anyPerm: ['portal.use', 'help.view'], needsPharmacy: false }, (ctx) => {
+router.get('/help/tickets/:id', { anyPerm: ['portal.use', 'driver.use', 'help.view'], needsPharmacy: false }, (ctx) => {
   const { t } = loadTicket(ctx, ctx.params.id);
   const msgs = all('SELECT m.*, u.name author_name FROM help_messages m JOIN users u ON u.id=m.author_user_id WHERE ticket_id=? ORDER BY m.id', t.id).map((m) => ({
     id: m.id, body: m.body, from_staff: !!m.from_staff, reply_as: m.reply_as, signature: m.signature, author_name: m.author_name, created_at: m.created_at,
@@ -56,7 +58,7 @@ router.get('/help/tickets/:id', { anyPerm: ['portal.use', 'help.view'], needsPha
   }));
   return { ...view(t), messages: msgs };
 });
-router.post('/help/tickets/:id/messages', { anyPerm: ['portal.use', 'help.reply'], needsPharmacy: false, bodyLimit: 8e6 }, (ctx) => {
+router.post('/help/tickets/:id/messages', { anyPerm: ['portal.use', 'driver.use', 'help.reply'], needsPharmacy: false, bodyLimit: 8e6 }, (ctx) => {
   const { t, owner, staff } = loadTicket(ctx, ctx.params.id); const b = ctx.body;
   if (t.status === 'closed') throw conflict('CLOSED', 'Cette conversation est clôturée');
   const asStaff = isStaff(ctx) && staff && !(owner && !isSuper(ctx) && t.from_pharmacy_id == null);
@@ -75,7 +77,7 @@ router.post('/help/tickets/:id/messages', { anyPerm: ['portal.use', 'help.reply'
     publish(t.pharmacy_id, 'help', { id: t.id }, null); return { id, signature: sig };
   });
 });
-router.post('/help/tickets/:id/close', { anyPerm: ['portal.use', 'help.reply'], needsPharmacy: false, ok200: true }, (ctx) => {
+router.post('/help/tickets/:id/close', { anyPerm: ['portal.use', 'driver.use', 'help.reply'], needsPharmacy: false, ok200: true }, (ctx) => {
   const { t, owner, staff } = loadTicket(ctx, ctx.params.id); if (!owner && !(staff && can(ctx.user, 'help.reply'))) throw forbidden();
   run("UPDATE help_tickets SET status='closed', updated_at=datetime('now') WHERE id=?", t.id); audit(ctx, 'help.close', 'help_ticket', t.id); return { ok: true };
 });
