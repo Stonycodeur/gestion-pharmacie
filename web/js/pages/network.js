@@ -66,14 +66,17 @@ function logoModal(p, done) {
 
 async function managerModal(p, done) {
   const users = (await get(`/users?pharmacy_id=${p.id}&kind=staff&limit=200`).catch(() => ({ data: [] }))).data || [];
-  const roles = (await get('/roles').catch(() => [])).filter((r) => !['super_admin', 'customer', 'guest'].includes(r.code));
-  const mode = h('select', {}, h('option', { value: 'new' }, 'Créer un nouveau compte'), users.length ? h('option', { value: 'existing' }, 'Choisir un membre du personnel') : null);
-  const exist = h('select', { hidden: true }, users.map((u) => h('option', { value: u.id }, `${u.name} — ${u.email}`)));
+  const roles = ((await get('/roles').catch(() => ({ roles: [] }))).roles || []).filter((r) => !['super_admin', 'customer', 'guest'].includes(r.code));
+  const admin = users.find((u) => u.role_code === 'pharmacy_admin' && u.status === 'active') || null; // un administrateur déjà présent peut très bien être le gestionnaire
+  const mode = h('select', {}, h('option', { value: 'new' }, 'Créer un nouveau compte'), users.length ? h('option', { value: 'existing', selected: !!admin }, 'Choisir un membre du personnel') : null);
+  const exist = h('select', { hidden: !admin }, users.map((u) => h('option', { value: u.id, selected: admin ? u.id === admin.id : false }, `${u.name} — ${u.email} (${u.role_code})`)));
   const name = h('input', { placeholder: 'Nom complet' }), email = h('input', { type: 'email', placeholder: 'E-mail' });
-  const role = h('select', {}, roles.map((r) => h('option', { value: r.code, selected: r.code === 'pharmacy_admin' }, r.label || r.code)));
+  const role = h('select', {}, roles.map((r) => h('option', { value: r.code, selected: r.code === (admin?.role_code || 'pharmacy_admin') }, r.label || r.code)));
   const nf = h('div', { class: 'grid g2' }, h('label', { class: 'f' }, 'Nom', name), h('label', { class: 'f' }, 'E-mail', email));
+  nf.hidden = !!admin;
   mode.addEventListener('change', () => { exist.hidden = mode.value !== 'existing'; nf.hidden = mode.value !== 'new'; });
-  const m = modal(`Gestionnaire — ${p.name}`, h('div', {}, h('p', { class: 'muted' }, 'Le gestionnaire administre les utilisateurs de cet établissement uniquement, avec les droits de son rôle (ajustables ensuite dans Utilisateurs → Droits).'), h('label', { class: 'f' }, 'Compte', mode), exist, nf, h('label', { class: 'f' }, 'Rôle / droits', role),
+  exist.addEventListener('change', () => { const u = users.find((x) => x.id === Number(exist.value)); if (u && [...role.options].some((o) => o.value === u.role_code)) role.value = u.role_code; });
+  const m = modal(`Gestionnaire — ${p.name}`, h('div', {}, admin ? h('div', { class: 'alert info' }, `L'administrateur ${admin.name} est déjà présent : il peut être directement le gestionnaire de cet établissement, aucun autre compte n'est nécessaire.`) : null, h('p', { class: 'muted' }, 'Le gestionnaire administre les utilisateurs de cet établissement uniquement, avec les droits de son rôle (ajustables ensuite dans Utilisateurs → Droits).'), h('label', { class: 'f' }, 'Compte', mode), exist, nf, h('label', { class: 'f' }, 'Rôle / droits', role),
     h('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '12px' } }, h('button', { class: 'btn primary', onclick: async () => {
       try { const b = mode.value === 'existing' ? { user_id: Number(exist.value), role_code: role.value } : { name: name.value, email: email.value, role_code: role.value }; const r = await post(`/pharmacies/${p.id}/manager`, b); m.close(); done();
         if (r.temporary_password) modal('Compte créé', h('div', {}, h('p', {}, 'Mot de passe provisoire (envoyé aussi par e-mail si l\'envoi est configuré) :'), h('code', { style: { fontSize: '1.2rem', userSelect: 'all' } }, r.temporary_password), h('p', { class: 'muted' }, 'À changer dès la première connexion.'))); else toast('Gestionnaire affecté'); } catch (e) { fail(e); } } }, 'Affecter'))));

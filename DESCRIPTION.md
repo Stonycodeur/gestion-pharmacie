@@ -197,3 +197,8 @@ Au premier lancement la base est vide : l'écran « Première configuration » c
 - **Chauffeur multi-pharmacies** : Utilisateurs › compte chauffeur › « Pharmacies rattachées… » (liste à cocher avec recherche). `GET/PUT /users/:id/driver-pharmacies` (super-admin et administrateur, droit `users.manage` ou `drivers.admin`) : le chauffeur voit et accepte les courses des clients de toutes ces pharmacies ; la pharmacie principale reste toujours rattachée ; chaque pharmacie ajoutée est prévenue (notification), le chauffeur aussi ; tout est audité.
 - **Vues dans Rôles & droits** : une permission `view.<vue>` par entrée du menu (29 vues : tableau de bord, caisse, ventes… espace chauffeur/médecin/client). Un menu s'affiche si le rôle a la vue ET la fonction correspondante ; les fonctions restent contrôlées côté serveur. À la mise à jour, les vues sont accordées automatiquement aux rôles (même personnalisés) qui avaient déjà la fonction : aucun menu ne disparaît. La matrice est groupée « Vues » / « Fonctions ». Sécurité et Mon profil restent toujours accessibles (compte personnel).
 - Tests : `tests/views.test.js` (8 tests).
+
+## Correctif « Gestionnaire » d'établissement
+
+- Réseau › Établissements › Gestionnaire : correction de l'erreur `filter is not a function` (la liste des rôles est lue dans `/roles` → `roles`).
+- Si l'établissement a déjà un administrateur actif, la fenêtre le propose directement (mode « membre du personnel » présélectionné, rôle repris) : l'administrateur peut être le gestionnaire, aucun autre compte n'est nécessaire.
