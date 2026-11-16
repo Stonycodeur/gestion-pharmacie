@@ -220,3 +220,9 @@ Au premier lancement la base est vide : l'écran « Première configuration » c
 - Une course n'est proposée qu'aux chauffeurs ayant choisi son mode : liste des offres, notification « Nouvelle course », acceptation / contre-proposition (refus 403 explicite), liste des chauffeurs affectables par l'administration. Un client ne peut pas demander un mode (hors programmée) si aucun chauffeur disponible ne l'a choisi (message dédié) ; l'affectation manuelle d'un chauffeur qui n'a pas choisi le mode est refusée.
 - Données : colonne `drivers.accepted_modes` (migration 023, MariaDB incluse ; défaut = tous les modes, comportement inchangé pour les comptes existants). `PUT /driver/me { accepted_modes:[…] }` ; sans précision à la mise en disponibilité (ancien client), les derniers modes enregistrés sont conservés. La liste admin des chauffeurs affiche la colonne « Modes reçus ».
 - Test : `tests/views.test.js` (10 tests).
+
+## Rafraîchissement réellement silencieux (espace chauffeur et portail)
+- Espace chauffeur : l'écran n'était vidé qu'avant la comparaison des données, d'où la page blanche à chaque rafraîchissement automatique. Désormais : les données (y compris les tarifs) sont chargées d'abord, comparées, puis, seulement si quelque chose a changé, le nouvel affichage est construit hors écran et substitué en une seule opération (`replaceChildren`). Aucune page vide, aucun saut ; en cas d'erreur réseau pendant un rafraîchissement silencieux, l'écran actuel est conservé.
+- Livraisons du portail client : même principe (construction hors écran puis remplacement atomique).
+- Le premier chargement mémorise l'état affiché : le premier rafraîchissement automatique ne redessine plus inutilement.
+- Vérifié au navigateur : aucune mutation sans changement de données ; lors d'un vrai changement, remplacement unique sans état vide.
